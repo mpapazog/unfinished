@@ -22,8 +22,8 @@
 #                                                <integer>                   : Report for last <integer> days
 #                                                last-week                   : Report for last week (Mon-Sun)
 #                                                last-month                  : Report for last calendar month
-#                                                <start date> - <end date>   : Report between two dates, including them
-#                                                                              Date format: dd.mm.yyyy
+#                                                <start date> to <end date>  : Report between two dates, including them
+#                                                                              Date format: yyyy-mm-dd
 #                           report-offline:<t> : Same as "report:", but does not execute a database sync first
 #                           dbdump             : Dump contents of database to screen
 #                           dbinfo             : Display database info and stored configuration
@@ -120,8 +120,9 @@
 # #TODO: add dbpurge?
 # #TODO: add dbarchive?
 # #TODO: add exclude-meraki-traffic?
+# #TODO: check why the script is throwing warnings when the same subnet has been configured multiple times (sub+vid+vname)
 #
-# This file was last modified on 2018-01-02
+# This file was last modified on 2018-01-17
 
 
 import sys, getopt, requests, json, time, ipaddress, datetime, sqlite3, os.path
@@ -217,7 +218,7 @@ LAST_MERAKI_REQUEST = datetime.datetime.now()
 REQUESTS_CONNECT_TIMEOUT = 30
 REQUESTS_READ_TIMEOUT = 30
 #Date format string for user input
-DATE_USER_FORMAT = '%d.%m.%Y'
+DATE_USER_FORMAT = '%Y-%m-%d'
 #Date format used for storage in database
 DATE_DB_FORMAT = '%Y-%m-%d'
 
@@ -232,7 +233,7 @@ def printhelp():
     #prints help text
 
     #DEBUG:
-    printusertext('DEBUG: Help text not implemented yet.')
+    printusertext('DEBUG: Help text not implemented yet. See script comments for usage instructions.')
     
     
     
@@ -888,6 +889,8 @@ def cmdreport(p_opt):
     #creates reports according to user preferences
     #TODO: unfinished
     
+    returnstr = ''
+    
     splitcmd = p_opt.rawcmd.split(':')
     firstpart = splitcmd[0].strip().lower()
     if (firstpart != 'report' and firstpart != 'report-offline') or len(splitcmd) != 2:
@@ -898,28 +901,103 @@ def cmdreport(p_opt):
     
     if timedef == 'last-week':
         
-        todaydate = datetime.datetime.today()
-        
+        todaydate = datetime.datetime.combine(datetime.datetime.now().date(), datetime.time(0,0,0))
+        weekdaytoday = todaydate.date().weekday()
+        #last and first day of previous week
         enddate      = (todaydate - datetime.timedelta(days=weekdaytoday+1) )
         startdate    = enddate - datetime.timedelta(6)       
-
-        #TODO: stuff
-                
+        
+        #DEBUG
+        print(startdate)
+        print(enddate)
     
     elif timedef == 'last-month':
         print('last month')
+        
+        todaydate = datetime.datetime.combine(datetime.datetime.now().date(), datetime.time(0,0,0))
+        #last and first day of previous month
+        enddate     = todaydate - datetime.timedelta(days=int(todaydate.strftime('%d')))
+        startdate   = enddate - datetime.timedelta(days=int(enddate.strftime('%d'))-1)
     
+        #DEBUG
+        print(startdate)
+        print(enddate)
     else:
-        print('something else')
-    
-    #calculate start date and end date for report
-    #   special date definitions: last-week and last-month
-    #   if only a number is given, end date is yesterday
-    # NOTE: datetime.datetime.today().weekday() returns int 0-6, Mon - Sun
-    
+        print('date to date')
+        dates = timedef.split('to')
+        if len(dates) == 2:
+            try:
+                date1 = datetime.datetime.strptime(dates[0].strip(), DATE_USER_FORMAT)
+                date2 = datetime.datetime.strptime(dates[1].strip(), DATE_USER_FORMAT)
+            except:
+                printusertext('ERROR Xrep3: Invalid time range definition "%s"' % timedef)
+                sys.exit(2)
+                            
+            if date1 < date2:
+                startdate   = date1
+                enddate     = date2
+            else:
+                startdate   = date2
+                enddate     = date1
+                  
+            #DEBUG
+            print(startdate)
+            print(enddate)
+        else:
+            printusertext('ERROR Xrep2: Invalid time range definition %s' % timedef)
+            sys.exit(2)
+        
     if os.path.exists(p_opt.dbfile):
         #DEBUG
         print('enter reports')
+        
+        try:
+            db = sqlite3.connect(p_opt.dbfile)
+            cursor  = db.cursor()
+            cursor.execute('''SELECT netid, netname FROM networks''')
+            nets    = cursor.fetchall()
+            cursor.execute('''SELECT groupid, groupname FROM groups''')
+            groups  = cursor.fetchall()
+        except:
+            printusertext('ERROR Xrep4: Unable to connect to database file "%s"' % p_opt.dbfile)
+            sys.exit(2)
+           
+        if len(nets) > 0 and len(groups) > 0:
+        
+            for group in groups:
+                flag_newgroup = True
+                for item in nets:
+                    flag_newnet = True
+                    #DEBUG
+                    print(item)
+                    
+                    try:
+                        cursor.execute('''SELECT date, groupid, up, down FROM data_''' + item[0] + ''' 
+                            WHERE date >= ? AND date <= ? AND groupid = ? 
+                            ORDER BY date ASC''', (startdate.date().isoformat(), enddate.date().isoformat(), group[0]))
+                        data = cursor.fetchall()
+                    except:
+                        printusertext('ERROR Xrep5: Unable to connect to database file "%s"' % p_opt.dbfile)
+                        sys.exit(2)
+                    up   = 0
+                    down = 0
+                    for line in data:
+                        #DEBUG
+                        print(line)
+                        
+                        up   += int(line[2])
+                        down += int(line[3])
+                    #DEBUG
+                    print(up)
+                    print(down)
+                       
+                
+
+        try:
+            db.close()
+        except:
+            printusertext('ERROR Xrep5: Unable to connect to database file "%s"' % p_opt.dbfile)
+            sys.exit(2)       
         
     else:
         printusertext('ERROR Xreport: File "%s" does not exist' % p_opt.dbfile)
@@ -1038,7 +1116,7 @@ def main(argv):
     #if no config from options has been loaded from db, init file, or cli arguments, set defaults
     #NOTE: EDIT THESE LINES TO MODIFY DEFAULT BEHAVIOR
     if opt.rawcmd       ==  '':
-        opt.rawcmd      =   'report:30'
+        opt.rawcmd      =   'report:last-month'
     if opt.rawfilter    ==  '':
         opt.rawfilter   =   'dtype:mx'
     if opt.rawgroups    ==  '':
