@@ -122,11 +122,13 @@
 # #TODO: add exclude-meraki-traffic?
 # #TODO: check why the script is throwing warnings when the same subnet has been configured multiple times (sub+vid+vname)
 #
-# This file was last modified on 2018-01-17
+# This file was last modified on 2018-01-24
 
 
 import sys, getopt, requests, json, time, ipaddress, datetime, sqlite3, os.path
-#from datetime import datetime, date
+
+
+#SECTION: CLASS DEFINITIONS
 
 #master class that contains all group and org info
 class c_environmentdata: #TODO: Is this needed?
@@ -149,6 +151,10 @@ class c_networkdata:
         self.name       = ''
         self.id         = ''
         self.tags       = ''
+        self.orgid      = '' #used by cmdreport()
+        self.orgname    = '' #used by cmdreport()
+        self.totalsent  = 0  #used by cmdreport()
+        self.totalrecv  = 0  #used by cmdreport()
         self.devs       = [] #array of c_devicedata()
         self.groups     = [] #if there are any net specific c_groupdata(), they will be added here
 #end class
@@ -211,16 +217,23 @@ class c_filterdata():
 #end class
 
 
+#SECTION: GLOBAL VARIABLES: MODIFY TO CHANGE SCRIPT BEHAVIOR
 #Used for time.sleep(API_EXEC_DELAY). Delay added to avoid hitting dashboard API max request rate
 API_EXEC_DELAY = 0.21
-LAST_MERAKI_REQUEST = datetime.datetime.now()
 #connect and read timeouts for the Requests module
 REQUESTS_CONNECT_TIMEOUT = 30
 REQUESTS_READ_TIMEOUT = 30
 #Date format string for user input
 DATE_USER_FORMAT = '%Y-%m-%d'
-#Date format used for storage in database
-DATE_DB_FORMAT = '%Y-%m-%d'
+#used to track if the database format used by this script has changed since a project database was created
+DB_VERSION = 3
+
+#SECTION: GLOBAL VARIABLES: DO NOT MODIFY
+LAST_MERAKI_REQUEST = datetime.datetime.now()   #used by merakirequestthrottler()
+DATE_DB_FORMAT = '%Y-%m-%d'                     #Date format used for storage in database
+
+
+#SECTION: CODE
 
 
 def printusertext(p_message):
@@ -729,7 +742,9 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
         db = sqlite3.connect(p_dbfile)
         cursor = db.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS 
-                networks(id INTEGER PRIMARY KEY, netid TEXT, netname TEXT)''')
+                networks(id INTEGER PRIMARY KEY, netid TEXT, netname TEXT, netorgid TEXT)''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS 
+                organizations(id INTEGER PRIMARY KEY, orgid TEXT, orgname TEXT)''')
         db.commit()
     except:
         printusertext('ERROR Xsync1: Unable to connect to database file "%s"' % p_dbfile)
@@ -737,6 +752,16 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
                 
     for org in p_orgs:
         printusertext('INFO: Processing organization "%s"' % org.name)
+        try:
+            cursor.execute('''SELECT orgid FROM organizations WHERE orgid=?''', (org.id,))
+            data = cursor.fetchall()
+            if len(data) == 0:
+                cursor.execute('''INSERT INTO organizations(orgid, orgname) VALUES(?,?)''', (org.id,org.name))
+                db.commit()
+        except:
+            printusertext('ERROR Xsync10: Unable to connect to database file "%s"' % p_dbfile)
+            sys.exit(2)
+        
         for net in org.nets:
             printusertext('INFO: Processing network "%s"...' % net.name)
             #make sure network name to id mapping and data table exist
@@ -744,20 +769,16 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
                 cursor.execute('''SELECT netid FROM networks WHERE netid=?''', (net.id,))
                 data = cursor.fetchall()
                 if len(data) == 0:
-                    cursor.execute('''CREATE TABLE IF NOT EXISTS data_''' + net.id + '''(id INTEGER PRIMARY KEY, date TEXT, groupid TEXT, up TEXT, down TEXT)''')
+                    cursor.execute('''CREATE TABLE IF NOT EXISTS 
+                        data_''' + net.id + '''(id INTEGER PRIMARY KEY, date TEXT, groupid TEXT, up TEXT, down TEXT)''')
                     db.commit()
-                    cursor.execute('''INSERT INTO networks(netid, netname) VALUES(?,?)''', (net.id,net.name))
+                    cursor.execute('''INSERT INTO 
+                        networks(netid, netname, netorgid) VALUES(?,?,?)''', (net.id,net.name,org.id))
                     db.commit()
             except:
                 printusertext('ERROR Xsync2: Unable to connect to database file "%s"' % p_dbfile)
                 sys.exit(2)
-                       
-            #DEBUG           
-            #cursor.execute('''DELETE FROM data_''' + net.id + ''' WHERE date='2017-12-31' ''')
-            #cursor.execute('''DELETE FROM data_''' + net.id + ''' WHERE date='2017-12-30' ''')
-            #cursor.execute('''DELETE FROM data_''' + net.id + ''' WHERE date='2017-12-29' ''')
-            #db.commit()
-            
+                                   
             today = datetime.datetime.combine(datetime.datetime.now().date(), datetime.time(0,0,0))
             max_past_date = today - datetime.timedelta(days=29)
                 
@@ -888,14 +909,16 @@ def cmddatabasedump(p_opt):
 def cmdreport(p_opt):
     #creates reports according to user preferences
     #TODO: unfinished
-    
-    returnstr = ''
-    
+    #TODO: add code for email and CSV report
+    #TODO: add warning for missing data
+        
     splitcmd = p_opt.rawcmd.split(':')
     firstpart = splitcmd[0].strip().lower()
     if (firstpart != 'report' and firstpart != 'report-offline') or len(splitcmd) != 2:
         printusertext('ERROR Xreport2: Invalid command syntax "%s"' % p_opt.rawcmd)
         sys.exit(2)
+        
+    #parse time definition parameters and set start and end dates accordingly    
         
     timedef = splitcmd[1].strip().lower()
     
@@ -907,23 +930,15 @@ def cmdreport(p_opt):
         enddate      = (todaydate - datetime.timedelta(days=weekdaytoday+1) )
         startdate    = enddate - datetime.timedelta(6)       
         
-        #DEBUG
-        print(startdate)
-        print(enddate)
     
     elif timedef == 'last-month':
-        print('last month')
         
         todaydate = datetime.datetime.combine(datetime.datetime.now().date(), datetime.time(0,0,0))
         #last and first day of previous month
         enddate     = todaydate - datetime.timedelta(days=int(todaydate.strftime('%d')))
         startdate   = enddate - datetime.timedelta(days=int(enddate.strftime('%d'))-1)
     
-        #DEBUG
-        print(startdate)
-        print(enddate)
     else:
-        print('date to date')
         dates = timedef.split('to')
         if len(dates) == 2:
             try:
@@ -940,23 +955,35 @@ def cmdreport(p_opt):
                 startdate   = date2
                 enddate     = date1
                   
-            #DEBUG
-            print(startdate)
-            print(enddate)
+        elif len(dates) == 1:
+            # "-c report:<integer>"
+            try:
+                dayscount = int(timedef.strip())
+            except:
+                printusertext('ERROR Xrep6: Invalid time range definition "%s"' % timedef)
+                sys.exit(2)
+        
+            todaydate   = datetime.datetime.combine(datetime.datetime.now().date(), datetime.time(0,0,0))
+            enddate     = todaydate - datetime.timedelta(days=1)
+            startdate   = todaydate - datetime.timedelta(days=dayscount)
+                    
         else:
-            printusertext('ERROR Xrep2: Invalid time range definition %s' % timedef)
+            printusertext('ERROR Xrep2: Invalid time range definition "%s"' % timedef)
             sys.exit(2)
         
     if os.path.exists(p_opt.dbfile):
-        #DEBUG
-        print('enter reports')
+    
+        #connect to database and extract data
         
         try:
             db = sqlite3.connect(p_opt.dbfile)
             cursor  = db.cursor()
-            cursor.execute('''SELECT netid, netname FROM networks''')
+            cursor.execute('''SELECT netid, netname, netorgid, orgid, orgname FROM 
+                networks, organizations 
+                WHERE netorgid = orgid 
+                ORDER BY orgname, netname ASC''')
             nets    = cursor.fetchall()
-            cursor.execute('''SELECT groupid, groupname FROM groups''')
+            cursor.execute('''SELECT groupid, groupname FROM groups ORDER BY groupid ASC''')
             groups  = cursor.fetchall()
         except:
             printusertext('ERROR Xrep4: Unable to connect to database file "%s"' % p_opt.dbfile)
@@ -964,34 +991,68 @@ def cmdreport(p_opt):
            
         if len(nets) > 0 and len(groups) > 0:
         
-            for group in groups:
-                flag_newgroup = True
-                for item in nets:
-                    flag_newnet = True
-                    #DEBUG
-                    print(item)
-                    
+            netgroupupdown = []
+            
+            for net in nets:
+                netgroupupdown.append(c_networkdata())
+                lastnet = len(netgroupupdown) - 1
+                netgroupupdown[lastnet].id      = net[0]
+                netgroupupdown[lastnet].name    = net[1]
+                netgroupupdown[lastnet].orgid   = net[3]
+                netgroupupdown[lastnet].orgname = net[4]
+                for group in groups:
+                    netgroupupdown[lastnet].groups.append(c_groupdata())
+                    lastgrp = len(netgroupupdown[lastnet].groups)-1
+                    netgroupupdown[lastnet].groups[lastgrp].id   = group[0]
+                    netgroupupdown[lastnet].groups[lastgrp].name = group[1]
+                    netgroupupdown[lastnet].groups[lastgrp].sbuffer.append(0)
+                    netgroupupdown[lastnet].groups[lastgrp].rbuffer.append(0)    
+
                     try:
-                        cursor.execute('''SELECT date, groupid, up, down FROM data_''' + item[0] + ''' 
+                        cursor.execute('''SELECT date, groupid, up, down FROM data_''' + net[0] + ''' 
                             WHERE date >= ? AND date <= ? AND groupid = ? 
-                            ORDER BY date ASC''', (startdate.date().isoformat(), enddate.date().isoformat(), group[0]))
+                            ORDER BY date ASC''', (startdate.date().isoformat(), enddate.date().isoformat(), netgroupupdown[lastnet].groups[lastgrp].id))
                         data = cursor.fetchall()
                     except:
                         printusertext('ERROR Xrep5: Unable to connect to database file "%s"' % p_opt.dbfile)
                         sys.exit(2)
-                    up   = 0
-                    down = 0
-                    for line in data:
-                        #DEBUG
-                        print(line)
                         
-                        up   += int(line[2])
-                        down += int(line[3])
-                    #DEBUG
-                    print(up)
-                    print(down)
-                       
+                    for line in data:                        
+                        netgroupupdown[lastnet].groups[lastgrp].sbuffer[0] += int(line[2])
+                        netgroupupdown[lastnet].groups[lastgrp].rbuffer[0] += int(line[3])
+                        netgroupupdown[lastnet].totalsent += int(line[2])
+                        netgroupupdown[lastnet].totalrecv += int(line[3])  
+                 
+            #render results    
+            
+            reportstr = ''                  
+            prevorgid = 'null'
+            for net in netgroupupdown:
+                if net.orgid != prevorgid:
+                    if len(reportstr) > 0:
+                        reportstr += '\n###\n\n'
+                    else:
+                        #TODO: CHANGE TO USE DATE_USER_FORMAT GLOBAL VAR
+                        reportstr += '\nReport for dates "%s" to "%s"\n\n' % (startdate.date().isoformat(), enddate.date().isoformat())
+                    reportstr += 'Organization: "%s"\n' % net.orgname
+                    prevorgid = net.orgid
+                reportstr += '\nNetwork: "%s"\n' % net.name
+                reportstr += 'Group name                   sent kB     sent %         recv kB     recv %\n'
                 
+                for group in net.groups:
+                    
+                    if net.totalsent == 0:
+                        percentsent = 0
+                    else:
+                        percentsent = (group.sbuffer[0]/net.totalsent)*100
+                    if net.totalrecv == 0:
+                        percentrecv = 0
+                    else:
+                        percentrecv = (group.rbuffer[0]/net.totalrecv)*100
+                    reportstr += '%-20s %15d %10.2f %15d %10.2f\n' % (group.name, group.sbuffer[0], percentsent, group.rbuffer[0], percentrecv)      
+                    
+            #DEBUG
+            print(reportstr)
 
         try:
             db.close()
@@ -1070,8 +1131,11 @@ def main(argv):
                 cursor.execute('''DROP TABLE IF EXISTS groups''')
                 db.commit()
             else:
-                cursor.execute('''SELECT groups, filter, report_method, report_mode FROM config ''')
+                cursor.execute('''SELECT groups, filter, report_method, report_mode, dbversion FROM config ''')
                 for row in cursor:
+                    if row[4] != DB_VERSION:
+                        printusertext('ERROR XX: Database version not compatible. Please start a new database' % opt.dbfile)
+                        sys.exit(2)
                     opt.rawgroups = row[0]
                     opt.rawfilter = row[1]
                     opt.method    = row[2]
@@ -1116,7 +1180,7 @@ def main(argv):
     #if no config from options has been loaded from db, init file, or cli arguments, set defaults
     #NOTE: EDIT THESE LINES TO MODIFY DEFAULT BEHAVIOR
     if opt.rawcmd       ==  '':
-        opt.rawcmd      =   'report:last-month'
+        opt.rawcmd      =   'report:last-week'
     if opt.rawfilter    ==  '':
         opt.rawfilter   =   'dtype:mx'
     if opt.rawgroups    ==  '':
@@ -1125,11 +1189,9 @@ def main(argv):
         opt.method      =   'sum'
     if opt.splitmode    ==  '':
         opt.splitmode   =   'split'
-    if opt.rawtime      ==  '':  #TODO: is this needed?
-        opt.rawtime     =   '30' #30 days
     
     #connect to db and write configuration if needed
-    try: #try
+    try:
         db = sqlite3.connect(opt.dbfile)
         cursor = db.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS 
@@ -1139,7 +1201,7 @@ def main(argv):
         data = cursor.fetchall()
         if len(data) == 0:
             cursor.execute('''INSERT INTO config(dbversion, groups, filter, report_method, report_mode)
-                  VALUES(2,?,?,?,?)''', (opt.rawgroups,opt.rawfilter, opt.method, opt.splitmode))
+                  VALUES(''' + str(DB_VERSION) + ''',?,?,?,?)''', (opt.rawgroups,opt.rawfilter, opt.method, opt.splitmode))
             db.commit()
         cursor.execute('''SELECT * FROM config ''')
         data = cursor.fetchall()        
