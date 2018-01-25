@@ -1,7 +1,7 @@
 # This is a script to calculate and compare usage statistics among different subnets.
 #
 # To run the script, enter:
-#  python usagestats.py -k <key> [-d <database> -c <command> -i <initfile> -g <groups> -f <filter> -m <method> -s <splitmode>]
+#  python usagestats.py -k <key> [-d <database> -c <command> -i <initfile> -g <groups> -f <filter>] [-u <user> -p <pass> -r <recipient> -s <server>]
 #
 # Example:
 #  python usagestats.py -k 1234 -i myproject.cfg -c report:last-month
@@ -26,10 +26,9 @@
 #                                                                              Date format: yyyy-mm-dd
 #                           report-offline:<t> : Same as "report:", but does not execute a database sync first
 #                           dbdump             : Dump contents of database to screen
-#                           dbinfo             : Display database info and stored configuration
 #                           dbreconfigure      : Overwrites configuration stored in the database with a new one. Does not
 #                                                touch network or usage data. Be very careful when using this option
-#                         If omitted, the default command is "report:30".
+#                         If omitted, the default command is "report:last-week".
 # Optional arguments to create a database:
 #   -i <initfile>       : Init config file, containing values to arguments (see section "Writing an init config file").
 #                         This file is only used when a new database is created.
@@ -63,19 +62,11 @@
 #                         Option "dtype:mx" includes teleworker gateways (Zx). Example of a valid filter combination:
 #                           "org:My company,tag:branch,dtype:mr"
 #                         If omitted, the default filter is "dtype:mx".
-# Optional reporting arguments:
-#   -m <method>         : Define how to assess bandwidth usage. Valid forms for <method>:
-#                           up          Only compare upstream traffic
-#                           down        Only compare downstream traffic
-#                           updown      Compare both up and down statistics separately
-#                           sum         Compare sum of upstream + downstream traffic
-#                           largest     For each client pick either up or down, whichever is largest 
-#                         If omitted, default is "sum".
-#   -s <splitmode>      : Define if stats will be calculated for each net individually or for whole scope.
-#                         Valid forms for <splitmode>:
-#                           split       Calculate separate statistics for every network
-#                           combine     Calculate overall combined statistics
-#                         If omitted, default is "split".
+# Optional arguments to send report by email. User, password and recipient are required for this function:
+#   -u <user>           : The username (email address) that will be used to send the alert message
+#   -p <pass>           : Password for the email address where the message is sent from
+#   -r <recipient>      : Recipient email address
+#   -s <server>         : Server to use for sending SMTP. If omitted, Gmail will be used
 #
 # Writing an init config file:
 #  An init config file can contain two sections: Groups and Options, as defined by the following headers:
@@ -101,8 +92,6 @@
 #  The following attributes are supported under the [OPTIONS] section:
 #   database=<filename>             : Define database filename
 #   filter=<filter>                 : Define filter
-#   report_method=<method>          : Define usage calculation method
-#   report_splitmode=<splitmode>    : Select split or combine stats
 #
 #  Blank lines an lines beginning with a hash character (#) will be ignored.
 #
@@ -120,12 +109,14 @@
 # #TODO: add dbpurge?
 # #TODO: add dbarchive?
 # #TODO: add exclude-meraki-traffic?
+# #TODO: add filter "dtag"?
+# #TODO: add dbinfo?
 # #TODO: check why the script is throwing warnings when the same subnet has been configured multiple times (sub+vid+vname)
 #
-# This file was last modified on 2018-01-24
+# This file was last modified on 2018-01-25
 
 
-import sys, getopt, requests, json, time, ipaddress, datetime, sqlite3, os.path
+import sys, getopt, requests, json, time, ipaddress, datetime, sqlite3, os.path, smtplib
 
 
 #SECTION: CLASS DEFINITIONS
@@ -153,8 +144,8 @@ class c_networkdata:
         self.tags       = ''
         self.orgid      = '' #used by cmdreport()
         self.orgname    = '' #used by cmdreport()
-        self.totalsent  = 0  #used by cmdreport()
-        self.totalrecv  = 0  #used by cmdreport()
+        self.totaldown  = 0  #used by cmdreport()
+        self.totalup    = 0  #used by cmdreport()
         self.devs       = [] #array of c_devicedata()
         self.groups     = [] #if there are any net specific c_groupdata(), they will be added here
 #end class
@@ -173,8 +164,8 @@ class c_groupdata:
     def __init__(self):
         self.name       = ''
         self.id         = ''
-        self.sbuffer    = []
-        self.rbuffer    = []
+        self.dbuffer    = []
+        self.ubuffer    = []
         self.subnets    = []
 #end class
 
@@ -200,12 +191,14 @@ class c_optiondata:
         self.rawfilter  = ''
         self.rawgroups  = ''
         self.rawnet     = ''
-        self.rawtime    = ''
         self.org        = ''
-        self.method     = ''
-        self.splitmode  = ''
         self.netname    = ''
         self.nettag     = ''
+        self.emailuser  = ''
+        self.emailpass  = ''
+        self.emailrecp  = ''
+        self.emailsrvr  = ''
+        self.sendemail  = False
 #end class
 
 class c_filterdata():
@@ -226,7 +219,7 @@ REQUESTS_READ_TIMEOUT = 30
 #Date format string for user input
 DATE_USER_FORMAT = '%Y-%m-%d'
 #used to track if the database format used by this script has changed since a project database was created
-DB_VERSION = 3
+DB_VERSION = 4
 
 #SECTION: GLOBAL VARIABLES: DO NOT MODIFY
 LAST_MERAKI_REQUEST = datetime.datetime.now()   #used by merakirequestthrottler()
@@ -636,7 +629,7 @@ def buildorgstructure(p_apikey, p_filters):
                                 else:
                                     printusertext('WARNING: Unable to read device data for net "%s"' % net['name'])
                             else:
-                                printusertext('INFO: Network "%s" contains no devices' % net['name'])
+                                printusertext('INFO: Network "%s": No devices in scope' % net['name'])
                                         
                             netcount += 1  
             else:
@@ -802,8 +795,8 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
             
             for group in net.groups:
                 for i in range(0,dcount):
-                    group.sbuffer.append(0.0)
-                    group.rbuffer.append(0.0)
+                    group.dbuffer.append(0.0)
+                    group.ubuffer.append(0.0)
                   
             if dcount > 1:
                 for dev in net.devs:
@@ -817,8 +810,8 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
                         for group in net.groups:
                             for subnet in group.subnets:
                                 if (subnet.subnet != '' and ipaddress.IPv4Address(client['ip']) in ipaddress.IPv4Network(subnet.subnet)) or (subnet.vid != '' and (client['vlan'] == int(subnet.vid))):
-                                    group.sbuffer[0] += client['usage']['sent']
-                                    group.rbuffer[0] += client['usage']['recv']
+                                    group.dbuffer[0] += client['usage']['sent'] #values returned by API are reverse
+                                    group.ubuffer[0] += client['usage']['recv']
                                     flag_gotmatch = True
                                     break
                             if flag_gotmatch:
@@ -836,8 +829,8 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
                             for group in net.groups:
                                 for subnet in group.subnets:
                                     if (subnet.subnet != '' and ipaddress.IPv4Address(client['ip']) in ipaddress.IPv4Network(subnet.subnet)) or (subnet.vid != '' and (client['vlan'] == int(subnet.vid))):
-                                        group.sbuffer[i] += client['usage']['sent']
-                                        group.rbuffer[i] += client['usage']['recv']
+                                        group.dbuffer[i] += client['usage']['sent'] #values returned by API are reverse
+                                        group.ubuffer[i] += client['usage']['recv']
                                         flag_gotmatch = True
                                         break
                                 if flag_gotmatch:
@@ -849,7 +842,7 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
                     for group in net.groups:
                         try:
                             cursor.execute('''INSERT INTO data_''' + net.id + '''(date, groupid, up, down) 
-                                VALUES(?,?,?,?)''', ((today - datetime.timedelta(days=dcount-i)).date().isoformat(), group.id, str(int(group.sbuffer[i-1]-group.sbuffer[i])), str(int(group.rbuffer[i-1]-group.rbuffer[i]))))
+                                VALUES(?,?,?,?)''', ((today - datetime.timedelta(days=dcount-i)).date().isoformat(), group.id, str(int(group.dbuffer[i-1]-group.dbuffer[i])), str(int(group.ubuffer[i-1]-group.ubuffer[i]))))
                         except:
                             printusertext('ERROR Xsyncdaily: Unable to connect to database file "%s"' % p_dbfile)
                             sys.exit(2)
@@ -908,8 +901,6 @@ def cmddatabasedump(p_opt):
    
 def cmdreport(p_opt):
     #creates reports according to user preferences
-    #TODO: unfinished
-    #TODO: add code for email and CSV report
     #TODO: add warning for missing data
         
     splitcmd = p_opt.rawcmd.split(':')
@@ -983,7 +974,7 @@ def cmdreport(p_opt):
                 WHERE netorgid = orgid 
                 ORDER BY orgname, netname ASC''')
             nets    = cursor.fetchall()
-            cursor.execute('''SELECT groupid, groupname FROM groups ORDER BY groupid ASC''')
+            cursor.execute('''SELECT groupid, groupname, subnets FROM groups ORDER BY groupid ASC''')
             groups  = cursor.fetchall()
         except:
             printusertext('ERROR Xrep4: Unable to connect to database file "%s"' % p_opt.dbfile)
@@ -1005,8 +996,8 @@ def cmdreport(p_opt):
                     lastgrp = len(netgroupupdown[lastnet].groups)-1
                     netgroupupdown[lastnet].groups[lastgrp].id   = group[0]
                     netgroupupdown[lastnet].groups[lastgrp].name = group[1]
-                    netgroupupdown[lastnet].groups[lastgrp].sbuffer.append(0)
-                    netgroupupdown[lastnet].groups[lastgrp].rbuffer.append(0)    
+                    netgroupupdown[lastnet].groups[lastgrp].dbuffer.append(0)
+                    netgroupupdown[lastnet].groups[lastgrp].ubuffer.append(0)    
 
                     try:
                         cursor.execute('''SELECT date, groupid, up, down FROM data_''' + net[0] + ''' 
@@ -1018,41 +1009,70 @@ def cmdreport(p_opt):
                         sys.exit(2)
                         
                     for line in data:                        
-                        netgroupupdown[lastnet].groups[lastgrp].sbuffer[0] += int(line[2])
-                        netgroupupdown[lastnet].groups[lastgrp].rbuffer[0] += int(line[3])
-                        netgroupupdown[lastnet].totalsent += int(line[2])
-                        netgroupupdown[lastnet].totalrecv += int(line[3])  
-                 
+                        netgroupupdown[lastnet].groups[lastgrp].dbuffer[0] += int(line[2])
+                        netgroupupdown[lastnet].groups[lastgrp].ubuffer[0] += int(line[3])
+                        netgroupupdown[lastnet].totaldown += int(line[2])
+                        netgroupupdown[lastnet].totalup   += int(line[3])  
+                                         
             #render results    
             
             reportstr = ''                  
             prevorgid = 'null'
             for net in netgroupupdown:
                 if net.orgid != prevorgid:
-                    if len(reportstr) > 0:
-                        reportstr += '\n###\n\n'
-                    else:
+                    if len(reportstr) == 0:
                         #TODO: CHANGE TO USE DATE_USER_FORMAT GLOBAL VAR
-                        reportstr += '\nReport for dates "%s" to "%s"\n\n' % (startdate.date().isoformat(), enddate.date().isoformat())
-                    reportstr += 'Organization: "%s"\n' % net.orgname
+                        reportstr += '\r\nUsage report: %s to %s\r\n' % (startdate.date().isoformat(), enddate.date().isoformat())
+                        for group in groups:
+                            reportstr += 'Group "%s": %s\r\n' % (group[1], group[2])
+                    reportstr += '\r\n###\r\n\r\nOrganization: "%s"\r\n' % net.orgname
                     prevorgid = net.orgid
-                reportstr += '\nNetwork: "%s"\n' % net.name
-                reportstr += 'Group name                   sent kB     sent %         recv kB     recv %\n'
+                reportstr += '\r\nNetwork: "%s"\r\n' % net.name
+                reportstr += 'Group name                     up kB       up %         down kB     down %        total kB    total %\r\n'
                 
                 for group in net.groups:
                     
-                    if net.totalsent == 0:
-                        percentsent = 0
+                    if net.totaldown == 0:
+                        percentdown = 0
                     else:
-                        percentsent = (group.sbuffer[0]/net.totalsent)*100
-                    if net.totalrecv == 0:
-                        percentrecv = 0
+                        percentdown = (group.dbuffer[0]/net.totaldown)*100
+                    if net.totalup   == 0:
+                        percentup   = 0
                     else:
-                        percentrecv = (group.rbuffer[0]/net.totalrecv)*100
-                    reportstr += '%-20s %15d %10.2f %15d %10.2f\n' % (group.name, group.sbuffer[0], percentsent, group.rbuffer[0], percentrecv)      
+                        percentup   = (group.ubuffer[0]/net.totalup)*100
+                    grpcombinedkb = group.dbuffer[0] + group.ubuffer[0]
+                    netcombinedkb = net.totaldown + net.totalup
+                    if netcombinedkb == 0:
+                        grpcombinedprc = 0
+                    else:
+                        grpcombinedprc = (grpcombinedkb/netcombinedkb)*100
+                    reportstr += '%-20s %15d %10.2f %15d %10.2f %15d %10.2f\r\n' % (group.name, group.ubuffer[0], percentup, group.dbuffer[0], percentdown, grpcombinedkb, grpcombinedprc)      
                     
-            #DEBUG
-            print(reportstr)
+            if p_opt.sendemail:
+                fromaddr = p_opt.emailuser
+                toaddrs  = p_opt.emailrecp
+                msg = "\r\n".join([
+                    "From: %s" % fromaddr,
+                    "To: %s" % toaddrs,
+                    "Subject: Network usage report [%s to %s]" % (startdate.date().isoformat(), enddate.date().isoformat()),
+                    "",
+                    reportstr])
+                
+                username = p_opt.emailuser
+                password = p_opt.emailpass
+                try:
+                    server = smtplib.SMTP(p_opt.emailsrvr)
+                    server.ehlo()
+                    server.starttls()
+                    server.login(username,password)
+                    server.sendmail(fromaddr, toaddrs, msg)
+                    server.quit()
+                except:
+                    printusertext('ERROR X09: Unable to send email')
+                    sys.exit(2)
+                printusertext('INFO: Email sent to %s' % toaddrs)
+            else:
+                print(reportstr)
 
         try:
             db.close()
@@ -1070,7 +1090,7 @@ def cmdreport(p_opt):
 def main(argv):
     printusertext('INFO: Script started at %s' % datetime.datetime.now())
     
-    #python usagestats.py -k <key> [-d <database> -c <command> -i <initfile> -g <groups> -f <filter> -m <method> -s <splitmode>]
+    #python usagestats.py -k <key> [-d <database> -c <command> -i <initfile> -g <groups> -f <filter>]
 
     #initialize variables for command line arguments
     arg_apikey      = ''
@@ -1079,12 +1099,14 @@ def main(argv):
     arg_initfile    = ''
     arg_groups      = ''
     arg_filter      = ''
-    arg_method      = ''
-    arg_splitmode   = ''
+    arg_user        = ''
+    arg_pass        = ''
+    arg_recipient   = ''
+    arg_server      = ''
         
     #get command line arguments
     try:
-        opts, args = getopt.getopt(argv, 'hk:d:c:i:g:f:m:s:')
+        opts, args = getopt.getopt(argv, 'hk:d:c:i:g:f:u:p:r:s:')
     except getopt.GetoptError:
         printhelp()
         sys.exit(2)
@@ -1105,10 +1127,14 @@ def main(argv):
             arg_groups  = arg
         elif opt == '-f':
             arg_filter  = arg
-        elif opt == '-m':
-            arg_method  = arg
+        elif opt == '-u':
+            arg_user    = arg
+        elif opt == '-p':
+            arg_pass    = arg
+        elif opt == '-r':
+            arg_recipient = arg
         elif opt == '-s':
-            arg_mode    = arg
+            arg_server  = arg
                       
     #check if all required parameters have been given
     if arg_apikey == '':
@@ -1118,9 +1144,23 @@ def main(argv):
     if arg_dbfile == '' and arg_initfile == '':
         printusertext('ERROR XX: Either a database or an init config file must be defined')
         sys.exit(2)
-                
-    #check if dbfile exists and load config from it if possible
+        
+    #make sure that either all email parameters are given, or none:
+    emailparams = 0
+    if arg_user     != '':
+        emailparams += 1
+    if arg_pass     != '':
+        emailparams += 1
+    if arg_recipient!= '':
+        emailparams += 1
+    if 0 < emailparams < 3:
+        printusertext('ERROR X04: -u <user> -p <pass> -r <recipient> must be given to send email')
+        sys.exit(2)
+             
+    #start collecting user option information
     opt = c_optiondata()
+        
+    #check if dbfile exists and load config from it if possible
     opt.dbfile = arg_dbfile
     if os.path.exists(opt.dbfile):
         try:
@@ -1131,15 +1171,13 @@ def main(argv):
                 cursor.execute('''DROP TABLE IF EXISTS groups''')
                 db.commit()
             else:
-                cursor.execute('''SELECT groups, filter, report_method, report_mode, dbversion FROM config ''')
+                cursor.execute('''SELECT groups, filter, dbversion FROM config ''')
                 for row in cursor:
-                    if row[4] != DB_VERSION:
+                    if row[2] != DB_VERSION:
                         printusertext('ERROR XX: Database version not compatible. Please start a new database' % opt.dbfile)
                         sys.exit(2)
                     opt.rawgroups = row[0]
                     opt.rawfilter = row[1]
-                    opt.method    = row[2]
-                    opt.splitmode = row[3]
             db.close()
         except:
             printusertext('ERROR XX: File "%s" is not a compatible SQLite database' % opt.dbfile)
@@ -1169,13 +1207,15 @@ def main(argv):
         opt.rawgroups = arg_groups
     if opt.rawfilter == '':
         opt.rawfilter = arg_filter   
-    #these are report time options and should override db and init
-    if arg_method    != '':
-        opt.method      = arg_method
-    if arg_splitmode != '':
-        opt.splitmode   = arg_splitmode
-    if arg_cmd       != '':
-        opt.rawcmd      = arg_cmd
+    #these are report time options
+    opt.rawcmd        = arg_cmd
+    opt.emailuser     = arg_user 
+    opt.emailpass     = arg_pass 
+    opt.emailrecp     = arg_recipient 
+    opt.emailsrvr     = arg_server 
+    if emailparams == 3:    #this was set way back, towards the beginning of main()
+        opt.sendemail = True
+    
         
     #if no config from options has been loaded from db, init file, or cli arguments, set defaults
     #NOTE: EDIT THESE LINES TO MODIFY DEFAULT BEHAVIOR
@@ -1185,23 +1225,21 @@ def main(argv):
         opt.rawfilter   =   'dtype:mx'
     if opt.rawgroups    ==  '':
         opt.rawgroups   =   'Overall=sub:0.0.0.0/0'
-    if opt.method       ==  '':
-        opt.method      =   'sum'
-    if opt.splitmode    ==  '':
-        opt.splitmode   =   'split'
+    if opt.emailsrvr    ==  '':
+        opt.emailsrvr   =   'smtp.gmail.com:587'
     
     #connect to db and write configuration if needed
     try:
         db = sqlite3.connect(opt.dbfile)
         cursor = db.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS 
-                config(id INTEGER PRIMARY KEY, dbversion INTEGER, groups TEXT, filter TEXT, report_method TEXT, report_mode TEXT)''')
+                config(id INTEGER PRIMARY KEY, dbversion INTEGER, groups TEXT, filter TEXT)''')
         db.commit()
         cursor.execute('''SELECT groups FROM config ''')
         data = cursor.fetchall()
         if len(data) == 0:
-            cursor.execute('''INSERT INTO config(dbversion, groups, filter, report_method, report_mode)
-                  VALUES(''' + str(DB_VERSION) + ''',?,?,?,?)''', (opt.rawgroups,opt.rawfilter, opt.method, opt.splitmode))
+            cursor.execute('''INSERT INTO config(dbversion, groups, filter)
+                  VALUES(''' + str(DB_VERSION) + ''',?,?)''', (opt.rawgroups,opt.rawfilter))
             db.commit()
         cursor.execute('''SELECT * FROM config ''')
         data = cursor.fetchall()        
