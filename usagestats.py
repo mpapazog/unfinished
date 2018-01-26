@@ -53,6 +53,7 @@
 #                           org:<org name>
 #                           net:<net name>
 #                           tag:<net tag>
+#                           dtag:<device tag>
 #                           dtype:<device type>
 #                         Valid options for dtype:
 #                           dtype:mr
@@ -95,21 +96,15 @@
 #
 #  Blank lines an lines beginning with a hash character (#) will be ignored.
 #
-#  You can override init config values for options "report_method" and "report_splitmode" with command line attributes.
-#   They only affect reporting and will not cause database corruption. For the rest of the options, if an init config
-#   value exists, the command line argument will be ignored with a warning.
-#
 # An example of an init config file can be found here:
 #   #TODO: insert link to github
 #
 # To make script chaining easier, all lines containing informational messages to the user
 #  start with the character @
 #
-# #TODO: #DEBUG: #STATUS: MVP
 # #TODO: add dbpurge?
 # #TODO: add dbarchive?
 # #TODO: add exclude-meraki-traffic?
-# #TODO: add filter "dtag"?
 # #TODO: add dbinfo?
 # #TODO: check why the script is throwing warnings when the same subnet has been configured multiple times (sub+vid+vname)
 #
@@ -199,6 +194,7 @@ class c_filterdata():
         self.org        = ''
         self.netname    = ''
         self.nettag     = ''
+        self.devtag     = ''
         self.devtype    = []
 #end class
 
@@ -231,7 +227,6 @@ def printusertext(p_message):
 def printhelp():
     #prints help text
 
-    #DEBUG:
     printusertext('This is a script to calculate and compare usage statistics among different subnets.')
     printusertext('Read the manual for more information: #TODO INSERT GITHUB LINK')
     printusertext('')
@@ -285,9 +280,10 @@ def printhelp():
     printusertext(' -f <filter>         : Process only certain organizations, networks, network tags or device types.')
     printusertext('                       You can define multiple filters by separating them with commas. Only one filter per type')
     printusertext('                       is allowed. Available filters:')
-    printusertext('                         org:<org name>')
-    printusertext('                         net:<net name>')
-    printusertext('                         tag:<net tag>')
+    printusertext('                         org:<organization name>')
+    printusertext('                         net:<network name>')
+    printusertext('                         tag:<network tag>')
+    printusertext('                         dtag:<device tag>')
     printusertext('                         dtype:<device type>')
     printusertext('                       Valid options for dtype:')
     printusertext('                         dtype:mr')
@@ -302,6 +298,8 @@ def printhelp():
     printusertext(' -p <pass>           : Password for the email address where the message is sent from')
     printusertext(' -r <recipient>      : Recipient email address')
     printusertext(' -s <server>         : Server to use for sending SMTP. If omitted, Gmail will be used')
+    printusertext('')
+    printusertext('Use double quotes ("") to pass arguments containing spaces in Windows.')
     
     
     
@@ -482,10 +480,6 @@ def loadinitfile(p_filename):
                         opt.dbfile      = splitline[1].strip()
                     elif splitline[0].strip() == 'filter':
                         opt.rawfilter   = splitline[1].strip()
-                    elif splitline[0].strip() == 'report_method':
-                        opt.method      = splitline[1].strip()
-                    elif splitline[0].strip() == 'report_splitmode':
-                        opt.splitmode   = splitline[1].strip()
     
     f.close()
     
@@ -672,18 +666,28 @@ def buildorgstructure(p_apikey, p_filters):
                                             if dev['model'][:len(dtype)] == dtype:
                                                 flag_matchdevtype = True
                                                 break
-                                        if flag_matchdevtype:
-                                            org.nets[netcount].devs.append(c_devicedata())
-                                            if not dev['name'] is None:
-                                                org.nets[netcount].devs[devcount].name   = dev['name']
-                                            org.nets[netcount].devs[devcount].serial = dev['serial']
-                                            if 'tags' in dev:
-                                                org.nets[netcount].devs[devcount].tags   = dev['tags']
-                                            devcount += 1
+                                        if flag_matchdevtype:                    
+                                            #match devtag. tags might not exist
+                                            flag_passdevtagtest = False
+                                            if p_filters.devtag == '': #if no devtag filter, nothing to check
+                                                flag_passdevtagtest = True
+                                            elif 'tags' in dev: #avoid invalid reference crash
+                                                if dev['tags'].find(p_filters.devtag) > -1:
+                                                    flag_passdevtagtest = True
+                                            #(else fail test)
+                                                    
+                                            if flag_passdevtagtest:
+                                                org.nets[netcount].devs.append(c_devicedata())
+                                                if not dev['name'] is None:
+                                                    org.nets[netcount].devs[devcount].name   = dev['name']
+                                                org.nets[netcount].devs[devcount].serial = dev['serial']
+                                                if 'tags' in dev:
+                                                    org.nets[netcount].devs[devcount].tags   = dev['tags']
+                                                devcount += 1
                                 else:
                                     printusertext('WARNING: Unable to read device data for net "%s"' % net['name'])
                             else:
-                                printusertext('INFO: Network "%s": No devices in scope' % net['name'])
+                                printusertext('INFO: Network "%s" contains no devices' % net['name'])
                                         
                             netcount += 1  
             else:
@@ -692,7 +696,6 @@ def buildorgstructure(p_apikey, p_filters):
             printusertext('INFO: Organization "%s" contains no networks' % org.name)
             
     #remove orgs and nets that contain no devices
-    
     cleanorgs = []
     orgcount = 0
     for org in orgs:
@@ -769,12 +772,21 @@ def decodefilters(p_filterstr):
                             output.devtype.append('Z')
                     else:
                         raise ValueError('dtype')
+                elif label == 'dtag':
+                    if output.devtag == '':
+                        output.devtag = splititem[1].strip()
+                    else:
+                        raise ValueError('dtag')
                         
             else:
                 raise ValueError('label')
     except:
         printusertext('ERROR 16: Invalid filter combination "%s"' % p_filterstr)
         sys.exit(2)
+        
+    if len(output.devtype) == 0:
+        output.devtype.append('MX')
+        output.devtype.append('Z')
            
     return(output)    
     
