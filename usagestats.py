@@ -105,7 +105,7 @@
 # To make script chaining easier, all lines containing informational messages to the user
 #  start with the character @
 #
-# #TODO: #DEBUG: #STATUS: Under development
+# #TODO: #DEBUG: #STATUS: MVP
 # #TODO: add dbpurge?
 # #TODO: add dbarchive?
 # #TODO: add exclude-meraki-traffic?
@@ -113,20 +113,15 @@
 # #TODO: add dbinfo?
 # #TODO: check why the script is throwing warnings when the same subnet has been configured multiple times (sub+vid+vname)
 #
-# This file was last modified on 2018-01-25
+# This file was last modified on 2018-01-26
 
 
 import sys, getopt, requests, json, time, ipaddress, datetime, sqlite3, os.path, smtplib
-
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 #SECTION: CLASS DEFINITIONS
 
-#master class that contains all group and org info
-class c_environmentdata: #TODO: Is this needed?
-    def __init__(self):
-        self.groups     = [] #array of c_groupdata()
-        self.orgs       = [] #array of c_organizationdata()
-#end class
 
 class c_organizationdata:
     def __init__(self):
@@ -134,7 +129,6 @@ class c_organizationdata:
         self.id         = ''
         self.shardhost  = ''
         self.nets       = [] #array of c_networkdata()
-        #self.groups     = [] #if there are any org specific c_groupdata(), they will be added here
 #end class  
 
 class c_networkdata:
@@ -147,7 +141,7 @@ class c_networkdata:
         self.totaldown  = 0  #used by cmdreport()
         self.totalup    = 0  #used by cmdreport()
         self.devs       = [] #array of c_devicedata()
-        self.groups     = [] #if there are any net specific c_groupdata(), they will be added here
+        self.groups     = [] #c_groupdata() will be added here
 #end class
 
 class c_devicedata:
@@ -156,7 +150,6 @@ class c_devicedata:
         self.serial     = ''
         self.tags       = ''
         self.clients    = []
-        #self.groups     = [] #if there are any device specific c_groupdata(), they will be added here
 #end class
 
 #class for subnet group definitions
@@ -169,7 +162,7 @@ class c_groupdata:
         self.subnets    = []
 #end class
 
-#TODO: check if all attributes are needed
+#subnet definition class. groups consist of multiples of these
 class c_subnetdata:
     def __init__(self):
         self.subnet     = ''
@@ -239,7 +232,76 @@ def printhelp():
     #prints help text
 
     #DEBUG:
-    printusertext('DEBUG: Help text not implemented yet. See script comments for usage instructions.')
+    printusertext('This is a script to calculate and compare usage statistics among different subnets.')
+    printusertext('Read the manual for more information: #TODO INSERT GITHUB LINK')
+    printusertext('')
+    printusertext('To run the script, enter:')
+    printusertext('python usagestats.py -k <key> [-d <db> -c <cmd> -i <initf> -g <grps> -f <filtr>] [-u <usr> -p <pw> -r <rcp> -s <srv>]')
+    printusertext('')
+    printusertext('Example:')
+    printusertext('python usagestats.py -k 1234 -i myproject.cfg -c report:last-month')
+    printusertext('')
+    printusertext('Mandatory argument:')
+    printusertext(' -k <key>            : Your Meraki Dashboard API key')
+    printusertext('Database and command operation arguments:')
+    printusertext(' -d <database>       : SQLite database filename. Can be omitted, if one is defined in the init config file')
+    printusertext('                       A separate database filename should be used for every report project. The first time a project')
+    printusertext('                       is created, its configuration should be given as an init cfg file, or command line arguments.')
+    printusertext('                       After the project is created, a copy of its configuration is stored in the database file.')
+    printusertext(' -c <command>        : Defines the operation to be executed by the script. Valid options:')
+    printusertext('                         sync               : Populate the database with information pulled from Dashboard. It is')
+    printusertext('                                              recommended that the sync operation is run at least once a week')
+    printusertext('                                              for every report project. The "report" command also executes a sync')
+    printusertext('                         report:<time>      : Generate a usage report for the time period defined in <time>. Valid')
+    printusertext('                                              options for <time>:')
+    printusertext('                                              <integer>                   : Report for last <integer> days')
+    printusertext('                                              last-week                   : Report for last week (Mon-Sun)')
+    printusertext('                                              last-month                  : Report for last calendar month')
+    printusertext('                                              <start date> to <end date>  : Report between two dates, including them')
+    printusertext('                                                                            Date format: yyyy-mm-dd')
+    printusertext('                         report-offline:<t> : Same as "report:", but does not execute a database sync first')
+    printusertext('                         dbdump             : Dump contents of database to screen')
+    printusertext('                         dbreconfigure      : Overwrites configuration stored in the database with a new one. Doesn\'t')
+    printusertext('                                              touch network or usage data. Be very careful when using this option')
+    printusertext('                       If omitted, the default command is "report:last-week".')
+    printusertext('Optional arguments to create a database:')
+    printusertext(' -i <initfile>       : Init config file, containing values to arguments (see section "Writing an init config file").')
+    printusertext('                       This file is only used when a new database is created.')
+    printusertext(' -g <groups>         : Define groups to compare for bandwidth usage. Valid forms for <groups>:')
+    printusertext('                         "<name>=<subnet>,<subnet>;<name>=<subnet>,<subnet>"')
+    printusertext('                       The value <name> defines a name for the group.')
+    printusertext('                       Valid values for <subnet>:')
+    printusertext('                         sub:<ip address>/<mask>         eg. sub:10.0.0.0/8')
+    printusertext('                         vid:<VLAN ID>                   eg. vid:10')
+    printusertext('                         vname:<VLAN name>               eg. vname:Corp')
+    printusertext('                       To make a subnet/vlan definition specific to one org, network or network tag prefix it')
+    printusertext('                       with one or more of the following:')
+    printusertext('                         @org:<org name>, @net:<net name>, @tag:<net tag>')
+    printusertext('                       Leave a space ( ) between the last prefix and the subnet/vlan definition.')
+    printusertext('                       Example:')
+    printusertext('                    "Corp=sub:192.168.10.0/24,sub:10.10.10.0/24,vname:Corp;Guest=sub:172.16.0.0/12,@org:Myorg vid:10"')
+    printusertext('                       You can use "vlanid" and "vlanname" instead of "vid" and "vname".')
+    printusertext('                       If omitted, one group will be displayed, with name "Overall" and subnet "0.0.0.0/0".')
+    printusertext(' -f <filter>         : Process only certain organizations, networks, network tags or device types.')
+    printusertext('                       You can define multiple filters by separating them with commas. Only one filter per type')
+    printusertext('                       is allowed. Available filters:')
+    printusertext('                         org:<org name>')
+    printusertext('                         net:<net name>')
+    printusertext('                         tag:<net tag>')
+    printusertext('                         dtype:<device type>')
+    printusertext('                       Valid options for dtype:')
+    printusertext('                         dtype:mr')
+    printusertext('                         dtype:ms')
+    printusertext('                         dtype:mx')
+    printusertext('                         dtype:all')
+    printusertext('                       Option "dtype:mx" includes teleworker gateways (Zx). Example of a valid filter combination:')
+    printusertext('                         "org:My company,tag:branch,dtype:mr"')
+    printusertext('                       If omitted, the default filter is "dtype:mx".')
+    printusertext('Optional arguments to send report by email. User, password and recipient are required for this function:')
+    printusertext(' -u <user>           : The username (email address) that will be used to send the alert message')
+    printusertext(' -p <pass>           : Password for the email address where the message is sent from')
+    printusertext(' -r <recipient>      : Recipient email address')
+    printusertext(' -s <server>         : Server to use for sending SMTP. If omitted, Gmail will be used')
     
     
     
@@ -261,7 +323,7 @@ def getorglist(p_apikey):
     try:
         r = requests.get('https://dashboard.meraki.com/api/v0/organizations', headers={'X-Cisco-Meraki-API-Key': p_apikey, 'Content-Type': 'application/json'}, timeout=(REQUESTS_CONNECT_TIMEOUT, REQUESTS_READ_TIMEOUT) )
     except:
-        printusertext('ERROR X01: Unable to contact Meraki cloud')
+        printusertext('ERROR 01: Unable to contact Meraki cloud')
         sys.exit(2)
     
     returnvalue = []
@@ -283,7 +345,7 @@ def getshardhost(p_apikey, p_orgid):
     try:
         r = requests.get('https://dashboard.meraki.com/api/v0/organizations/%s/snmp' % p_orgid, headers={'X-Cisco-Meraki-API-Key': p_apikey, 'Content-Type': 'application/json'}, timeout=(REQUESTS_CONNECT_TIMEOUT, REQUESTS_READ_TIMEOUT) )
     except:
-        printusertext('ERROR X02: Unable to contact Meraki cloud')
+        printusertext('ERROR 02: Unable to contact Meraki cloud')
         sys.exit(2)
     
     if r.status_code != requests.codes.ok:
@@ -302,7 +364,7 @@ def getnwlist(p_apikey, p_shardhost, p_orgid):
     try:
         r = requests.get('https://%s/api/v0/organizations/%s/networks' % (p_shardhost, p_orgid), headers={'X-Cisco-Meraki-API-Key': p_apikey, 'Content-Type': 'application/json'}, timeout=(REQUESTS_CONNECT_TIMEOUT, REQUESTS_READ_TIMEOUT) )
     except:
-        printusertext('ERROR XXnet: Unable to contact Meraki cloud')
+        printusertext('ERROR 03: Unable to contact Meraki cloud')
         sys.exit(2)
     
     returnvalue = []
@@ -320,7 +382,7 @@ def getdevicelist(p_apikey, p_shardhost, p_nwid):
     try:
         r = requests.get('https://%s/api/v0/networks/%s/devices' % (p_shardhost, p_nwid), headers={'X-Cisco-Meraki-API-Key': p_apikey, 'Content-Type': 'application/json'}, timeout=(REQUESTS_CONNECT_TIMEOUT, REQUESTS_READ_TIMEOUT) )
     except:
-        printusertext('ERROR XXdev: Unable to contact Meraki cloud')
+        printusertext('ERROR 04: Unable to contact Meraki cloud')
         sys.exit(2)
         
     returnvalue = []
@@ -337,7 +399,7 @@ def getvlanlist(p_apikey, p_shardhost, p_nwid):
     try:
         r = requests.get('https://%s/api/v0/networks/%s/vlans' % (p_shardhost, p_nwid), headers={'X-Cisco-Meraki-API-Key': p_apikey, 'Content-Type': 'application/json'}, timeout=(REQUESTS_CONNECT_TIMEOUT, REQUESTS_READ_TIMEOUT) )
     except:
-        printusertext('ERROR XXvlan: Unable to contact Meraki cloud')
+        printusertext('ERROR 05: Unable to contact Meraki cloud')
         sys.exit(2)
         
     returnvalue = []
@@ -353,7 +415,7 @@ def getclientlist(p_apikey, p_shardhost, p_serial, p_timespan):
     try:
         r = requests.get('https://%s/api/v0/devices/%s/clients?timespan=%s' % (p_shardhost, p_serial, p_timespan), headers={'X-Cisco-Meraki-API-Key': p_apikey, 'Content-Type': 'application/json'}, timeout=(REQUESTS_CONNECT_TIMEOUT, REQUESTS_READ_TIMEOUT) )
     except:
-        printusertext('ERROR XXclient: Unable to contact Meraki cloud')
+        printusertext('ERROR 06: Unable to contact Meraki cloud')
         sys.exit(2)
         
     returnvalue = []
@@ -374,7 +436,7 @@ def loadinitfile(p_filename):
     try:
         f = open(p_filename, 'r')
     except:
-        printusertext('ERROR XX: Unable to open file "%s"' % p_filename)
+        printusertext('ERROR 07: Unable to open file "%s"' % p_filename)
         sys.exit(2)
         
     for line in f:
@@ -391,7 +453,7 @@ def loadinitfile(p_filename):
                     #groups' parsing logic goes here
                     splitline = stripped.split('=')
                     if len(splitline) < 2:
-                        printusertext('ERROR XX: Invalid config line in file "%s": "%s"' % (p_filename, stripped))
+                        printusertext('ERROR 08: Invalid config line in file "%s": "%s"' % (p_filename, stripped))
                         sys.exit(2)
                     elif splitline[0].strip() == 'groupname':
                         if len(groupstr) > 0:
@@ -414,7 +476,7 @@ def loadinitfile(p_filename):
                     
                     splitline = stripped.split('=')
                     if len(splitline) < 2:
-                        printusertext('ERROR XX: Invalid config line in file "%s": "%s"' % (p_filename, stripped))
+                        printusertext('ERROR 09: Invalid config line in file "%s": "%s"' % (p_filename, stripped))
                         sys.exit(2)
                     elif splitline[0].strip() == 'database':
                         opt.dbfile      = splitline[1].strip()
@@ -447,7 +509,7 @@ def decodegroups(p_groupstr, p_dbfile):
         if len(splitblock) > 1:
             payload = splitblock[1].split(',')
         else:
-            printusertext('ERROR XX: Invalid group definition "%s"' % block.strip())
+            printusertext('ERROR 10: Invalid group definition "%s"' % block.strip())
             sys.exit(2)
         for net in payload:
             grp[gcount].subnets.append(c_subnetdata())
@@ -484,7 +546,7 @@ def decodegroups(p_groupstr, p_dbfile):
                 flag_gotsubnet = False
             
             if not flag_gotsubnet:
-                printusertext('ERROR XX: Invalid subnet definition "%s"' % net.strip())
+                printusertext('ERROR 11: Invalid subnet definition "%s"' % net.strip())
                 sys.exit(2)
             
             while flag_gotmod:
@@ -517,7 +579,7 @@ def decodegroups(p_groupstr, p_dbfile):
                     else:
                         flag_modparsefail = True
                 if flag_modparsefail:
-                    printusertext('ERROR XX2: Invalid subnet definition %s' % net.strip())
+                    printusertext('ERROR 12: Invalid subnet definition %s' % net.strip())
                     sys.exit(2)
                 rest = rest[rcursor+1:].strip()
                                  
@@ -542,19 +604,11 @@ def decodegroups(p_groupstr, p_dbfile):
             db.commit()
         db.close()
     except:
-        printusertext('ERROR Xdecode1: Unable to connect to database file "%s"' % p_dbfile)
+        printusertext('ERROR 13: Unable to connect to database file "%s"' % p_dbfile)
         sys.exit(2)
         
     return (grp)
-    
-def printdbinfo(p_dbfile):
-    #TODO: code
-    
-    #DEBUG
-    print('DEBUG: Function printdbinfo() not implemented yet.')
-
-    return (0)
-    
+        
     
 def buildorgstructure(p_apikey, p_filters):
     #builds master object where all org, net, device and client data will be read
@@ -565,7 +619,7 @@ def buildorgstructure(p_apikey, p_filters):
     #compile list of organizations to be processed
     orgjson = getorglist(p_apikey)
     if orgjson[0]['id'] == 'null':
-        printusertext('ERROR XX07: Unable to retrieve org list')
+        printusertext('ERROR 14: Unable to retrieve org list')
         sys.exit(2)
             
     i = 0
@@ -589,7 +643,7 @@ def buildorgstructure(p_apikey, p_filters):
                 flag_unabletoresolveshard = False
                 break
         if flag_unabletoresolveshard:
-            printusertext('ERROR X08: Unable to read data for org "%s"' % record.name)
+            printusertext('ERROR 15: Unable to read data for org "%s"' % record.name)
             sys.exit(2)
         else:
             record.shardhost = shardhost 
@@ -719,7 +773,7 @@ def decodefilters(p_filterstr):
             else:
                 raise ValueError('label')
     except:
-        printusertext('ERROR XX: Invalid filter combination "%s"' % p_filterstr)
+        printusertext('ERROR 16: Invalid filter combination "%s"' % p_filterstr)
         sys.exit(2)
            
     return(output)    
@@ -740,7 +794,7 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
                 organizations(id INTEGER PRIMARY KEY, orgid TEXT, orgname TEXT)''')
         db.commit()
     except:
-        printusertext('ERROR Xsync1: Unable to connect to database file "%s"' % p_dbfile)
+        printusertext('ERROR 17: Unable to connect to database file "%s"' % p_dbfile)
         sys.exit(2)
                 
     for org in p_orgs:
@@ -752,7 +806,7 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
                 cursor.execute('''INSERT INTO organizations(orgid, orgname) VALUES(?,?)''', (org.id,org.name))
                 db.commit()
         except:
-            printusertext('ERROR Xsync10: Unable to connect to database file "%s"' % p_dbfile)
+            printusertext('ERROR 18: Unable to connect to database file "%s"' % p_dbfile)
             sys.exit(2)
         
         for net in org.nets:
@@ -769,7 +823,7 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
                         networks(netid, netname, netorgid) VALUES(?,?,?)''', (net.id,net.name,org.id))
                     db.commit()
             except:
-                printusertext('ERROR Xsync2: Unable to connect to database file "%s"' % p_dbfile)
+                printusertext('ERROR 19: Unable to connect to database file "%s"' % p_dbfile)
                 sys.exit(2)
                                    
             today = datetime.datetime.combine(datetime.datetime.now().date(), datetime.time(0,0,0))
@@ -788,7 +842,7 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
                         newestdate = max_past_date
                     
             except: 
-                printusertext('ERROR Xsync3: Unable to connect to database file "%s"' % p_dbfile)
+                printusertext('ERROR 20: Unable to connect to database file "%s"' % p_dbfile)
                 sys.exit(2)   
             
             dcount = (today - newestdate).days #cannot be more than 29 days and contains no time
@@ -844,12 +898,12 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
                             cursor.execute('''INSERT INTO data_''' + net.id + '''(date, groupid, up, down) 
                                 VALUES(?,?,?,?)''', ((today - datetime.timedelta(days=dcount-i)).date().isoformat(), group.id, str(int(group.dbuffer[i-1]-group.dbuffer[i])), str(int(group.ubuffer[i-1]-group.ubuffer[i]))))
                         except:
-                            printusertext('ERROR Xsyncdaily: Unable to connect to database file "%s"' % p_dbfile)
+                            printusertext('ERROR 21: Unable to connect to database file "%s"' % p_dbfile)
                             sys.exit(2)
                     try:
                         db.commit()
                     except:
-                        printusertext('ERROR Xsyncdaily2: Unable to connect to database file "%s"' % p_dbfile)
+                        printusertext('ERROR 22: Unable to connect to database file "%s"' % p_dbfile)
                         sys.exit(2)
             #end "if dcount > 0"
         #end "for net in org.nets"
@@ -858,7 +912,7 @@ def cmdsyncdatabase(p_apikey, p_orgs, p_dbfile):
     try:
         db.close()
     except:
-        printusertext('ERROR Xsync_dbclose: Unable to connect to database file "%s"' % p_dbfile)
+        printusertext('ERROR 23: Unable to connect to database file "%s"' % p_dbfile)
         sys.exit(2)
         
     printusertext('INFO: Database sync complete')
@@ -890,10 +944,10 @@ def cmddatabasedump(p_opt):
                     
             db.close()
         except:
-            printusertext('ERROR Xdump: Unable to connect to database file "%s"' % p_opt.dbfile)
+            printusertext('ERROR 24: Unable to connect to database file "%s"' % p_opt.dbfile)
             sys.exit(2)
     else:
-        printusertext('ERROR Xdump2: File "%s" does not exist' % p_opt.dbfile)
+        printusertext('ERROR 25: File "%s" does not exist' % p_opt.dbfile)
         sys.exit(2)
     
     return (0)
@@ -906,7 +960,7 @@ def cmdreport(p_opt):
     splitcmd = p_opt.rawcmd.split(':')
     firstpart = splitcmd[0].strip().lower()
     if (firstpart != 'report' and firstpart != 'report-offline') or len(splitcmd) != 2:
-        printusertext('ERROR Xreport2: Invalid command syntax "%s"' % p_opt.rawcmd)
+        printusertext('ERROR 26: Invalid command syntax "%s"' % p_opt.rawcmd)
         sys.exit(2)
         
     #parse time definition parameters and set start and end dates accordingly    
@@ -936,7 +990,7 @@ def cmdreport(p_opt):
                 date1 = datetime.datetime.strptime(dates[0].strip(), DATE_USER_FORMAT)
                 date2 = datetime.datetime.strptime(dates[1].strip(), DATE_USER_FORMAT)
             except:
-                printusertext('ERROR Xrep3: Invalid time range definition "%s"' % timedef)
+                printusertext('ERROR 27: Invalid time range definition "%s"' % timedef)
                 sys.exit(2)
                             
             if date1 < date2:
@@ -951,7 +1005,7 @@ def cmdreport(p_opt):
             try:
                 dayscount = int(timedef.strip())
             except:
-                printusertext('ERROR Xrep6: Invalid time range definition "%s"' % timedef)
+                printusertext('ERROR 28: Invalid time range definition "%s"' % timedef)
                 sys.exit(2)
         
             todaydate   = datetime.datetime.combine(datetime.datetime.now().date(), datetime.time(0,0,0))
@@ -959,7 +1013,7 @@ def cmdreport(p_opt):
             startdate   = todaydate - datetime.timedelta(days=dayscount)
                     
         else:
-            printusertext('ERROR Xrep2: Invalid time range definition "%s"' % timedef)
+            printusertext('ERROR 29: Invalid time range definition "%s"' % timedef)
             sys.exit(2)
         
     if os.path.exists(p_opt.dbfile):
@@ -977,7 +1031,7 @@ def cmdreport(p_opt):
             cursor.execute('''SELECT groupid, groupname, subnets FROM groups ORDER BY groupid ASC''')
             groups  = cursor.fetchall()
         except:
-            printusertext('ERROR Xrep4: Unable to connect to database file "%s"' % p_opt.dbfile)
+            printusertext('ERROR 30: Unable to connect to database file "%s"' % p_opt.dbfile)
             sys.exit(2)
            
         if len(nets) > 0 and len(groups) > 0:
@@ -1005,7 +1059,7 @@ def cmdreport(p_opt):
                             ORDER BY date ASC''', (startdate.date().isoformat(), enddate.date().isoformat(), netgroupupdown[lastnet].groups[lastgrp].id))
                         data = cursor.fetchall()
                     except:
-                        printusertext('ERROR Xrep5: Unable to connect to database file "%s"' % p_opt.dbfile)
+                        printusertext('ERROR 31: Unable to connect to database file "%s"' % p_opt.dbfile)
                         sys.exit(2)
                         
                     for line in data:                        
@@ -1016,19 +1070,25 @@ def cmdreport(p_opt):
                                          
             #render results    
             
-            reportstr = ''                  
-            prevorgid = 'null'
+            reportstr  = '' #plaintext version of report
+            reporthtml = '<html><head></head><body>' #HTML version of report
+            prevorgid  = 'null'
             for net in netgroupupdown:
                 if net.orgid != prevorgid:
                     if len(reportstr) == 0:
                         #TODO: CHANGE TO USE DATE_USER_FORMAT GLOBAL VAR
-                        reportstr += '\r\nUsage report: %s to %s\r\n' % (startdate.date().isoformat(), enddate.date().isoformat())
+                        reportstr  += '\r\nUsage report: %s to %s\r\n' % (startdate.date().isoformat(), enddate.date().isoformat())
+                        reporthtml += '<h1>Usage report: %s to %s</h1>' % (startdate.date().isoformat(), enddate.date().isoformat())
                         for group in groups:
-                            reportstr += 'Group "%s": %s\r\n' % (group[1], group[2])
-                    reportstr += '\r\n###\r\n\r\nOrganization: "%s"\r\n' % net.orgname
+                            reportstr  += 'Group "%s": %s\r\n' % (group[1], group[2])
+                            reporthtml += '<p>Group "%s": %s</p>' % (group[1], group[2])
+                    reportstr  += '\r\n###\r\n\r\nOrganization: "%s"\r\n' % net.orgname
+                    reporthtml += '<br><br><h2>Organization: "%s"</h3>' % net.orgname
                     prevorgid = net.orgid
-                reportstr += '\r\nNetwork: "%s"\r\n' % net.name
-                reportstr += 'Group name                     up kB       up %         down kB     down %        total kB    total %\r\n'
+                reportstr  += '\r\nNetwork: "%s"\r\n' % net.name
+                reportstr  += 'Group name                     up kB       up %         down kB     down %        total kB    total %\r\n'
+                reporthtml += '<h3>Network: "%s"</h3>' % net.name
+                reporthtml += '<table><tr><td style="min-width:100px">Group name</td><td style="min-width:60px">up kB</td><td style="min-width:60px">up %</td><td style="min-width:60px">down kB</td><td style="min-width:60px">down %</td><td style="min-width:60px">total kB</td><td style="min-width:60px">total %</td></tr>'
                 
                 for group in net.groups:
                     
@@ -1046,42 +1106,56 @@ def cmdreport(p_opt):
                         grpcombinedprc = 0
                     else:
                         grpcombinedprc = (grpcombinedkb/netcombinedkb)*100
-                    reportstr += '%-20s %15d %10.2f %15d %10.2f %15d %10.2f\r\n' % (group.name, group.ubuffer[0], percentup, group.dbuffer[0], percentdown, grpcombinedkb, grpcombinedprc)      
+                    reportstr  += '%-20s %15d %10.2f %15d %10.2f %15d %10.2f\r\n' % (group.name, group.ubuffer[0], percentup, group.dbuffer[0], percentdown, grpcombinedkb, grpcombinedprc)
+                    reporthtml += '<tr><td>%-20s</td><td>%15d</td><td>%10.2f</td><td>%15d</td><td>%10.2f</td><td>%15d</td><td>%10.2f</td></tr>' % (group.name, group.ubuffer[0], percentup, group.dbuffer[0], percentdown, grpcombinedkb, grpcombinedprc)
+                reporthtml += '</table>'
+            reporthtml += '</body>'   
                     
             if p_opt.sendemail:
-                fromaddr = p_opt.emailuser
-                toaddrs  = p_opt.emailrecp
-                msg = "\r\n".join([
-                    "From: %s" % fromaddr,
-                    "To: %s" % toaddrs,
-                    "Subject: Network usage report [%s to %s]" % (startdate.date().isoformat(), enddate.date().isoformat()),
-                    "",
-                    reportstr])
-                
-                username = p_opt.emailuser
+                # me == my email address
+                # you == recipient's email address
+                me       = p_opt.emailuser
+                you      = p_opt.emailrecp
                 password = p_opt.emailpass
+
+                # Create message container - the correct MIME type is multipart/alternative.
+                msg = MIMEMultipart('alternative')
+                msg['Subject'] = "Subject: Network usage report [%s to %s]" % (startdate.date().isoformat(), enddate.date().isoformat())
+                msg['From'] = me
+                msg['To'] = you
+            
+                # Record the MIME types of both parts - text/plain and text/html.
+                part1 = MIMEText(reportstr, 'plain')
+                part2 = MIMEText(reporthtml, 'html')
+                
+                # Attach parts into message container.
+                # According to RFC 2046, the last part of a multipart message, in this case
+                # the HTML message, is best and preferred.
+                msg.attach(part1)
+                msg.attach(part2)
+            
                 try:
                     server = smtplib.SMTP(p_opt.emailsrvr)
                     server.ehlo()
                     server.starttls()
-                    server.login(username,password)
-                    server.sendmail(fromaddr, toaddrs, msg)
+                    server.login(me,password)
+                    server.sendmail(me, you, msg.as_string())
                     server.quit()
                 except:
-                    printusertext('ERROR X09: Unable to send email')
+                    printusertext('ERROR 32: Unable to send email')
                     sys.exit(2)
-                printusertext('INFO: Email sent to %s' % toaddrs)
+                printusertext('INFO: Email sent to %s' % you)
             else:
                 print(reportstr)
 
         try:
             db.close()
         except:
-            printusertext('ERROR Xrep5: Unable to connect to database file "%s"' % p_opt.dbfile)
+            printusertext('ERROR 33: Unable to connect to database file "%s"' % p_opt.dbfile)
             sys.exit(2)       
         
     else:
-        printusertext('ERROR Xreport: File "%s" does not exist' % p_opt.dbfile)
+        printusertext('ERROR 34: File "%s" does not exist' % p_opt.dbfile)
         sys.exit(2)
 
     return (0)
@@ -1142,7 +1216,7 @@ def main(argv):
         sys.exit(2)
         
     if arg_dbfile == '' and arg_initfile == '':
-        printusertext('ERROR XX: Either a database or an init config file must be defined')
+        printusertext('ERROR 35: Either a database or an init config file must be defined')
         sys.exit(2)
         
     #make sure that either all email parameters are given, or none:
@@ -1154,7 +1228,7 @@ def main(argv):
     if arg_recipient!= '':
         emailparams += 1
     if 0 < emailparams < 3:
-        printusertext('ERROR X04: -u <user> -p <pass> -r <recipient> must be given to send email')
+        printusertext('ERROR 36: -u <user> -p <pass> -r <recipient> must be given to send email')
         sys.exit(2)
              
     #start collecting user option information
@@ -1174,13 +1248,13 @@ def main(argv):
                 cursor.execute('''SELECT groups, filter, dbversion FROM config ''')
                 for row in cursor:
                     if row[2] != DB_VERSION:
-                        printusertext('ERROR XX: Database version not compatible. Please start a new database' % opt.dbfile)
+                        printusertext('ERROR 37: Database version not compatible. Please start a new database' % opt.dbfile)
                         sys.exit(2)
                     opt.rawgroups = row[0]
                     opt.rawfilter = row[1]
             db.close()
         except:
-            printusertext('ERROR XX: File "%s" is not a compatible SQLite database' % opt.dbfile)
+            printusertext('ERROR 38: File "%s" is not a compatible SQLite database' % opt.dbfile)
             sys.exit(2)
     else:
         printusertext('INFO: Creating new database file "%s"' % arg_dbfile)
@@ -1197,7 +1271,7 @@ def main(argv):
     
     #check if dbfile info was loaded from init file
     if opt.dbfile == '':
-        printusertext('ERROR XX: Database file must be defined in init file of command line argument')
+        printusertext('ERROR 39: Database file must be defined in init file of command line argument')
         sys.exit(2)
         
         
@@ -1247,16 +1321,12 @@ def main(argv):
             raise ValueError ('no write')
         db.close()
     except:
-        printusertext('ERROR XX: Unable to connect to database file "%s"' % opt.dbfile)
+        printusertext('ERROR 40: Unable to connect to database file "%s"' % opt.dbfile)
         sys.exit(2)
         
     
-    #if command is dbinfo display info without connecting to Dashboard
-    if opt.rawcmd == 'dbinfo':
-    
-        printdbinfo(opt.dbfile)
-        
-    elif opt.rawcmd == 'dbdump':
+    #if command is dbdump, dump database without connecting to Dashboard       
+    if opt.rawcmd == 'dbdump':
     
         cmddatabasedump(opt)
         
