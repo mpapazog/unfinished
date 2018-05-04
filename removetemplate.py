@@ -42,8 +42,7 @@
 # To make script chaining easier, all lines containing informational messages to the user
 #  start with the character @
 #
-#
-# This file was last modified on 2018-05-02
+# This file was last modified on 2018-05-04
 
 import sys, getopt, requests, json, time
 from datetime import datetime
@@ -329,7 +328,7 @@ def stripdefaultrule(p_inputruleset):
     
 def main(argv):
 
-#  removetemplate.py -k <key> -o <org> -m <mapping mode> [-a <admin privilege> -f <filter> -b <base net>]
+#  python removetemplate.py -k <key> -o <org> [-a <admin privilege> -f <filter tag> -b <base net>]
 
     #initialize variables for command line arguments
     arg_apikey      = ''
@@ -415,13 +414,13 @@ def main(argv):
                 elif network['tags'].find(arg_filter) == -1:
                     flag_infilterscope = False
                     
-                if flag_infilterscope:     
-                    if network['type'] != 'combined' and network['type'].find('appliance') == -1:
-                        printusertext('WARNING: Skipping net "%s": Must be type "combined" or "appliance"' % network['name'])
-                    else:
-                        cleannetlist.append(network)
+            if flag_infilterscope:     
+                if network['type'] != 'combined' and network['type'].find('appliance') == -1:
+                    printusertext('WARNING: Skipping net "%s": Must be type "combined" or "appliance"' % network['name'])
                 else:
-                    printusertext('WARNING: Skipping net "%s": Not in filter scope' % network['name'])  
+                    cleannetlist.append(network)
+            else:
+                printusertext('WARNING: Skipping net "%s": Not in filter scope' % network['name']) 
         else:
             printusertext('WARNING: Skipping net "%s": Not bound to a template' % network['name'])
             
