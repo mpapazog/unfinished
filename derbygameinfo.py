@@ -93,7 +93,7 @@ def main(argv):
         #print(prevstate)
            
         if flag_haschanged:   
-            print('here')
+            #print('here')
             if flag_gottarget:
                 putgameinfo(arg_targetsrv, gamestate)
             else:
