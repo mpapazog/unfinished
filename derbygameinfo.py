@@ -11,8 +11,8 @@ import xml.etree.ElementTree as ET
 DATA_UPDATE_INTERVAL = 0.2
 
 #connect and read timeouts for the Requests module
-REQUESTS_CONNECT_TIMEOUT = 60
-REQUESTS_READ_TIMEOUT    = 60
+REQUESTS_CONNECT_TIMEOUT = 10
+REQUESTS_READ_TIMEOUT    = 10
     
 
 def registertoscoreboard(p_server):
@@ -34,7 +34,7 @@ def getgameinfo2(p_server, p_sessionkey):
     
     
 def putgameinfo(p_server, p_gamedata):
-    r = requests.put('http://%s' % p_server, data=json.dumps(p_gamedata), headers={'Content-Type': 'application/json'}, timeout=(REQUESTS_CONNECT_TIMEOUT, REQUESTS_READ_TIMEOUT))
+    r = requests.post('http://%s' % p_server, data=json.dumps(p_gamedata), headers={'Content-Type': 'application/json'}, timeout=(REQUESTS_CONNECT_TIMEOUT, REQUESTS_READ_TIMEOUT))
     
     if r.status_code != requests.codes.ok:
         return (None)
@@ -116,6 +116,7 @@ def main(argv):
                     putgameinfo(arg_targetsrv, gamestate)
                 except:
                     print('WARNING: Unable to contact target server')
+                print ('Sent update at %s' % datetime.datetime.now())
             else:
                 print(gamestate)
 
