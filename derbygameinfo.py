@@ -3,7 +3,7 @@
 # Usage:
 #  python derbygameinfo.py -s <source server> [-t <target server>]
 #
-# This file was last modified on 2018-05-07
+# This file was last modified on 2018-05-08
 
 import sys, getopt, requests, json, time, datetime
 import xml.etree.ElementTree as ET
@@ -14,9 +14,18 @@ DATA_UPDATE_INTERVAL = 0.2
 REQUESTS_CONNECT_TIMEOUT = 60
 REQUESTS_READ_TIMEOUT    = 60
     
+
+def registertoscoreboard(p_server):
+    r = requests.get('http://%s:8000/XmlScoreBoard/register' % p_server, timeout=(REQUESTS_CONNECT_TIMEOUT, REQUESTS_READ_TIMEOUT))
     
-def getgameinfo2(p_server):
-    r = requests.get('http://%s:8000/XmlScoreBoard/get?key=85238ed0-2509-448c-b4fa-0a600da7eab9' % p_server, timeout=(REQUESTS_CONNECT_TIMEOUT, REQUESTS_READ_TIMEOUT))
+    if r.status_code != requests.codes.ok:
+        return (None)
+            
+    return(r.text)    
+    
+    
+def getgameinfo2(p_server, p_sessionkey):
+    r = requests.get('http://%s:8000/XmlScoreBoard/get?key=%s' % (p_server, p_sessionkey), timeout=(REQUESTS_CONNECT_TIMEOUT, REQUESTS_READ_TIMEOUT))
     
     if r.status_code != requests.codes.ok:
         return (None)
@@ -56,7 +65,7 @@ def main(argv):
     
     print ('Source server: %s' % arg_sourcesrv)
     print ('Target server: %s' % arg_targetsrv)
-    print ('Press Ctrl+C to exit')
+    print ('Press Ctrl+C repeatedly to exit')
     
     gamestate = {'Clock': 
         {
@@ -69,12 +78,23 @@ def main(argv):
             '1': {'Score':'0'},
             '2': {'Score':'0'}
         }}
+        
+    sessionkey = ''
+    #this may crash if unable to register. that is OK, since the script cannot coninue without sessionkey
+    retvalue = registertoscoreboard(arg_sourcesrv)   
+    root = ET.fromstring(retvalue)
+    for key in root.iter('Key'):
+        sessionkey = key.text
+             
                 
     while True:
         flag_haschanged = False
         time.sleep(DATA_UPDATE_INTERVAL)
-        retvalue = getgameinfo2(arg_sourcesrv)
-        #print(retvalue)
+        try:
+            retvalue = getgameinfo2(arg_sourcesrv, sessionkey)
+        except:
+            print('WARNING: Unable to contact scoreboard server')
+            retvalue = None
         if not retvalue is None:
             root = ET.fromstring(retvalue)
             for clock in root.iter('Clock'):
@@ -89,13 +109,13 @@ def main(argv):
                 for elem in team.iter('Score'):
                     gamestate['Team'][teamid]['Score'] = elem.text
                     flag_haschanged = True
-
-        #print(prevstate)
            
-        if flag_haschanged:   
-            #print('here')
+        if flag_haschanged:  
             if flag_gottarget:
-                putgameinfo(arg_targetsrv, gamestate)
+                try:
+                    putgameinfo(arg_targetsrv, gamestate)
+                except:
+                    print('WARNING: Unable to contact target server')
             else:
                 print(gamestate)
 
