@@ -3,7 +3,7 @@
 # Usage:
 #  python derbygameinfo.py -s <source server> [-t <target server>]
 #
-# This file was last modified on 2018-05-08
+# This file was last modified on 2018-05-09
 
 import sys, getopt, requests, json, time, datetime
 import xml.etree.ElementTree as ET
@@ -11,8 +11,8 @@ import xml.etree.ElementTree as ET
 DATA_UPDATE_INTERVAL = 0.2
 
 #connect and read timeouts for the Requests module
-REQUESTS_CONNECT_TIMEOUT = 10
-REQUESTS_READ_TIMEOUT    = 10
+REQUESTS_CONNECT_TIMEOUT = 5
+REQUESTS_READ_TIMEOUT    = 5
     
 
 def registertoscoreboard(p_server):
@@ -69,15 +69,20 @@ def main(argv):
     
     gamestate = {'Clock': 
         {
-            'Period'        : '30:00',
-            'Jam'           : '2:00',
-            'Lineup'        : '00:00',
-            'Intermission'  : '15:00'
+            'Period'        : {'Running': 'false', 'Time': '30:00', 'Number':0},
+            'Jam'           : {'Running': 'false', 'Time': '02:00', 'Number':0},
+            'Lineup'        : {'Running': 'false', 'Time': '00:00', 'Number':0},
+            'Intermission'  : {'Running': 'false', 'Time': '15:00', 'Number':0},
+            'Timeout'       : {'Running': 'false', 'Time': '01:00', 'Number':0}
         },
         'Team':{
-            '1': {'Score':'0'},
-            '2': {'Score':'0'}
+            '1': {'Score':0, 'Jamscore':0},
+            '2': {'Score':0, 'Jamscore':0}
         }}
+        
+    periodnumber    = 0
+    jamnumber       = 0
+    lastscore       = {'1':0, '2':0}
         
     sessionkey = ''
     #this may crash if unable to register. that is OK, since the script cannot coninue without sessionkey
@@ -96,18 +101,36 @@ def main(argv):
             print('WARNING: Unable to contact scoreboard server')
             retvalue = None
         if not retvalue is None:
+            #DEBUG
+            #print('')
+            #print(retvalue)
+            
             root = ET.fromstring(retvalue)
             for clock in root.iter('Clock'):
                 clockid = clock.get('Id')
+                for elem in clock.iter('Running'):
+                    gamestate['Clock'][clockid]['Running'] = elem.text
+                    flag_haschanged = True
                 for elem in clock.iter('Time'):
                     seconds=int(int(elem.text)/1000)
                     m, s = divmod(seconds, 60)
-                    gamestate['Clock'][clockid] = '%02d:%02d' % (m,s)
+                    gamestate['Clock'][clockid]['Time'] = '%02d:%02d' % (m,s)
                     flag_haschanged = True
+                for elem in clock.iter('Number'):
+                    if clockid == 'Jam':
+                        if int(elem.text) != gamestate['Clock']['Jam']['Number']:
+                            lastscore['1'] = gamestate['Team']['1']['Score']
+                            lastscore['2'] = gamestate['Team']['2']['Score']
+                            gamestate['Team']['1']['Jamscore'] = 0
+                            gamestate['Team']['2']['Jamscore'] = 0
+                    gamestate['Clock'][clockid]['Number'] = int(elem.text)
+                    flag_haschanged = True
+                        
             for team in root.iter('Team'):
                 teamid = team.get('Id')
                 for elem in team.iter('Score'):
-                    gamestate['Team'][teamid]['Score'] = elem.text
+                    gamestate['Team'][teamid]['Score'] = int(elem.text)
+                    gamestate['Team'][teamid]['Jamscore'] = gamestate['Team'][teamid]['Score'] - lastscore[teamid]
                     flag_haschanged = True
            
         if flag_haschanged:  
