@@ -80,12 +80,10 @@ def main(argv):
             '2': {'Score':0, 'Jamscore':0}
         }}
         
-    periodnumber    = 0
-    jamnumber       = 0
     lastscore       = {'1':0, '2':0}
         
     sessionkey = ''
-    #this may crash if unable to register. that is OK, since the script cannot coninue without sessionkey
+    #this may crash if unable to register. that is OK, since the script cannot continue without a sessionkey
     retvalue = registertoscoreboard(arg_sourcesrv)   
     root = ET.fromstring(retvalue)
     for key in root.iter('Key'):
