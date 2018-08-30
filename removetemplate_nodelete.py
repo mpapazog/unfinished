@@ -593,10 +593,11 @@ def main(argv):
                             flag_nomatchfound = False
                         break
                 if flag_nomatchfound:
-                    printusertext('ERROR 21: VLAN "%s" verification failed for net "%s"' % (srcvlan['id'], newnamemod))
+                    #DEBUG
+                    printusertext('WARNING: VLAN "%s" verification failed for net "%s"' % (srcvlan['id'], newnamemod))
                     #DEBUG
                     #deletenet(arg_apikey, newnetid, shard)
-                    sys.exit(2)
+                    #sys.exit(2)
         #endif not netvlans is None
         
         #Process firewall rules
