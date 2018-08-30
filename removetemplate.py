@@ -573,13 +573,22 @@ def main(argv):
             for srcvlan in netvlans:
                 flag_nomatchfound = True
                 for finvlan in finalvlans:
+                    #DEBUG
+                    print ('DEBUG: Checking source %s vs final %s' % (srcvlan['id'], finvlan['id']))
                     if srcvlan['id'] == finvlan['id']:
                         flag_allvaluesmatch = True    
                         for label in srcvlan:
+                            #DEBUG
+                            print ('DEBUG: Checking label %s' % label)
                             if label != 'networkId':
                                 if srcvlan[label] != finvlan[label]:
+                                    #DEBUG
+                                    print ('DEBUG: Check failed')
                                     flag_allvaluesmatch = False
-                                    break                        
+                                    break 
+                                else:
+                                    #DEBUG
+                                    print ('DEBUG: Check passed')
                         if flag_allvaluesmatch:
                             flag_nomatchfound = False
                         break
