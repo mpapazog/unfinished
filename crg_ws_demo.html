@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>WebSocket demo</title>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    </head>
+    <body>
+        <script>
+            var ws = new WebSocket("ws://127.0.0.1:8000/WS/");
+                
+            ws.onmessage = function (event) {
+                var message = document.createElement('p'),
+                    content = document.createTextNode(event.data);
+                message.appendChild(content);
+                document.body.appendChild(message);
+            };
+            
+            ws.onerror = function () {
+                var message = document.createElement('p'),
+                    content = document.createTextNode('socket error');
+                message.appendChild(content);
+                document.body.appendChild(message);
+            };
+            
+            ws.onclose = function () {
+                var message = document.createElement('p'),
+                    content = document.createTextNode('closed');
+                message.appendChild(content);
+                document.body.appendChild(message);
+            };
+            
+            
+            ws.onopen = function() {
+                ws.send(JSON.stringify({"action":"Register","paths":["ScoreBoard"]}));
+            }
+            
+            $( document ).ready(function() {
+                
+            });
+            
+            setInterval(function() {
+                ws.send(JSON.stringify({"action":"Ping"}));
+            }, 25000);
+            
+        </script>
+        
+        <ul id=log></ul>
+    </body>
+</html>
