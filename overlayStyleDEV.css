@@ -1,0 +1,561 @@
+@import url('https://fonts.googleapis.com/css?family=Roboto:700');
+
+/* MAIN OVERLAY CLASSES START HERE */
+
+    .chroma-key {
+        background-color: gray;
+    }
+    
+    .font_style {
+      font-family: "Roboto", Sans-serif;
+      font-weight: 700;
+    }
+        
+    .bgcolour-default {
+        background-color: white;
+    }
+    
+    .font-colour-default{
+        color: #4c4c4c;    
+    }    
+    
+    .bgcolour-clockface-static {
+        background-color: #101010;  
+    }
+    
+    .font-colour-clockface {
+        color: #378aaf;    
+    }
+    
+    
+    .bgcolour-clockface-gradient1 {
+        background-image: linear-gradient(#d4e7f6, #e3f1fa);
+    }
+    
+    .bgcolour-clockface-gradient2 {
+        background-image: linear-gradient(#e3f1fa, white);
+    }
+    
+    .colour-scheme-popup1 {
+        background-image: linear-gradient(white, lightgrey);   
+    }
+    .colour-scheme-popup2 {
+        background-image: linear-gradient(lightgrey, white);
+    }
+        
+    .team_panel {
+        width:  324px;
+        height: 60px;
+        line-height: 60px;
+        position: inherit;
+    }
+        
+    .team1_panel_position {
+      position: absolute;
+      top: 60px;
+      left: 60px;
+    }
+    
+    .team2_panel_position {
+      position: absolute;
+      top: 120px;
+      left: 60px;
+    }
+    
+    .team_logo {
+      width: 60px;
+      height: 60px;
+      position: inherit;
+      background-size: 100% 100%;
+    }
+    
+    .team_colour {
+      width: 24px;
+      height: 60px;
+      position: inherit;
+      left: 60px;
+    }
+    
+    .team_vertical_line {
+      width: 4px;
+      height: 60px;
+      position: inherit;
+      left: 84px;
+    }
+        
+    .team_name {
+      width: 130px;
+      height: 60px;
+      position: inherit;
+      left: 88px;
+      font-size: 42px;
+      text-align: center;
+    }
+    
+    .team_score {
+      width: 120px;
+      height: 60px;
+      position: inherit;
+      left: 218px;
+      font-size: 52px;
+      text-align: center;
+    }
+    
+    .team_lead {
+        position: inherit;
+        left: 62px;
+        top: 0px;
+        font-size: 24px;
+        font-family: "Arial", Sans-serif;
+        text-shadow: 2px 2px grey;
+        text-align: center;
+        line-height: 60px;
+    }
+    
+    .team_info_popup {
+        width:  330px;
+        height: 0px; /* Dynamically set to 40px using Javascript */
+        left:4px;
+        font-size: 24px;
+        text-align: center;
+        line-height: 40px;
+    }
+    
+    
+    .team1_info_popup_position {
+        position: inherit;
+        bottom: 60px;
+    }
+    
+    .team2_info_popup_position {
+        position: inherit;
+        top: 60px;
+    }
+    
+    .clock_panel {
+        width:  0px; /* DEV set to 180px using javascript */
+        height: 60px;
+        line-height: 60px;
+    }
+    
+    .jam_panel {
+        width:  0px; /* DEV set to 180px using javascript */
+        height: 60px;
+        line-height: 60px;
+    }
+    
+    .period_panel {
+        width:  180px; 
+        height: 0px; /* DEV set to 60px using javascript */
+        line-height: 60px;
+    }
+    
+    .period_panel_position {
+      position: inherit;
+      bottom: 60px;
+      right: 0px;
+    }
+    
+    .jam_panel_position {
+      position: inherit;
+      bottom: 0px;
+      right: 0px;
+    }
+    
+    .clocks_container {
+        position: absolute;
+        width:  180px;
+        height: 120px;
+        top:    60px;
+        right:  60px;
+    }
+    
+    .clock_face {
+        position: inherit;
+        width: 100px; /* DEV set to 100px using javascript */
+        height:100%;
+        left: 80px;
+        font-size: 32px;
+        text-align: center;
+    }
+    
+    .clock_label {
+        width: 80px;
+        position: inherit;
+        left: 0px;
+        font-size: 32px;
+        text-align: center;
+    }
+    
+    .intermission_clock {
+        position:   absolute;
+        top:        120px;
+        right:      60px;
+        width:      180px;
+        height:     60px;
+        line-height:60px;
+        font-size:  32px;
+        text-align: center;
+    }
+        
+    .vert_align_middle {
+        line-height: 60px;
+    }
+    
+    .lineup_popup {
+        width:  172px;
+        height: 0px; /* Dynamically set to 40px using Javascript */
+        font-size: 24px;
+        position: inherit;
+        text-align: center;
+        line-height: 40px;
+        top: 60px;
+        right:4px;
+    }
+    
+    
+    .center {
+        text-align: center;
+    }
+            
+    .timeout_banner_shard_1 {
+        position:absolute;
+        height:20px;
+        left: 0px;
+        bottom: 210px;
+        width: 0%;
+    }
+    
+    .timeout_banner_shard_2 {
+        position:absolute;
+        height:22px;
+        right: 0px;
+        bottom: 190px;
+        width: 0%;
+    }
+    
+    .timeout_banner_shard_3 {
+        position:absolute;
+        height:22px;
+        left: 0px;
+        bottom: 170px;
+        width: 0%;
+    }
+    
+    .timeout_banner_shard_4 {
+        position:absolute;
+        height:22px;
+        right: 0px;
+        bottom: 150px;
+        width: 0%;
+    }
+    
+    .timeout_text_container {
+        text-align:center;
+        position:absolute;
+        bottom:150px;
+        left:0px;
+        width:100%;
+    }
+    
+    .timeout_banner_text {
+      font-size: 36px;
+      line-height: 80px;
+      display:inline-block;
+    }
+    
+    .timeout_banner_shard_1_nosponsor {
+        position:absolute;
+        height:20px;
+        left: 0px;
+        bottom: 80px;
+        width: 0%;
+    }
+    
+    .timeout_banner_shard_2_nosponsor {
+        position:absolute;
+        height:22px;
+        right: 0px;
+        bottom: 60px;
+        width: 0%;
+    }
+    
+    .timeout_banner_shard_3_nosponsor {
+        position:absolute;
+        height:22px;
+        left: 0px;
+        bottom: 40px;
+        width: 0%;
+    }
+    
+    .timeout_banner_shard_4_nosponsor {
+        position:absolute;
+        height:22px;
+        right: 0px;
+        bottom: 20px;
+        width: 0%;
+    }
+    
+    .timeout_text_container_nosponsor {
+        text-align:center;
+        position:absolute;
+        bottom:20px;
+        left:0px;
+        width:100%;
+    }
+    
+    .sponsor_banner {
+        width: 100%;
+    }
+    
+    .sponsor_banner_shard_1 {
+        position:absolute;
+        height:40px;
+        left: 0px;
+        bottom: 100px;
+        width: 0%;
+        opacity: 0.9;
+    }
+    
+    .sponsor_banner_shard_2 {
+        position:absolute;
+        height:30px;
+        right: 0px;
+        bottom: 70px;
+        width: 0%;
+        opacity: 0.9;
+    }
+    
+    .sponsor_banner_shard_3 {
+        position:absolute;
+        height:30px;
+        left: 0px;
+        bottom: 40px;
+        width: 0%;
+        opacity: 0.9;
+    }
+    
+    .sponsor_banner_shard_4 {
+        position:absolute;
+        height:30px;
+        right: 0px;
+        bottom: 10px;
+        width: 0%;
+        opacity: 0.9;
+    }
+    
+    .sponsor_text_container {
+        display:inline-block;
+        text-align:center;
+        position:absolute;
+        bottom:15px;
+        left:0px;
+        height:110px;
+        width:100%;
+    }
+    
+    .sponsor_banner_spacer {
+      width:100px;
+    }
+    
+    .sponsor_banner_text {
+      font-size: 60px;
+      line-height: 120px;
+      display:inline-block;
+      height:120px;
+    }
+    
+/* MAIN OVERLAY CLASSES END HERE. REST IS FOR AUX PAGES */
+    
+    .checker_tool_table {
+        font-size: 40px;
+    }
+    
+    .scoreonly_back_image {
+        width: 100%;
+        height: 150px;
+        position: absolute;
+        top: 540px;
+        left:0px;
+        text-align:center;
+        font-size: 110px;
+        line-height: 150px;
+        background-size: 100% 100%;
+        display:inline-block;
+        background-image: url("/img/brozen_slice_narrow.jpg");
+    }
+    
+    .scoreonly_team_1 {
+        position:absolute;
+        top: 780px;
+        left:000px;
+        width: 960px;
+        text-align:right;
+        
+    }
+    
+    .scoreonly_team_2 {
+        position:absolute;
+        top: 780px;
+        right: 000px;
+        width: 960px;
+        text-align:left;
+        
+    }
+    
+    .scoreonly_team_name {
+        font-size: 52px;    
+        display:inline-block; 
+        width:380px;
+            
+    }
+        
+    .scoreonly_team_table {
+        display:inline-block;
+    }
+    
+    .scoreonly_team_logo {
+        width: 200px;
+        height: 200px;
+        position: inherit;
+        text-align: center;
+        background-size: 100% 100%;
+        display:inline-block;
+    }
+    
+    .scoreonly_team_score {
+        display:inline-block;
+        font-size: 100px;
+		line-height: 200px;
+        text-align: center;
+        width: 190px;
+    }
+    
+    .clockonly_clock_container {
+        width: 100%;
+        position: absolute;
+        top: 840px;
+        left:0px;
+        text-align:center;
+        display:inline-block;        
+    }
+    
+    
+    .clockonly_clock {
+		width:300px;
+        height:150px;
+		font-size:100px;
+		text-align:center;
+		line-height: 150px;
+        display:inline-block;    
+        border-radius: 10px;    
+    }
+    
+    .hype_nextgame_container {
+        width: 100%;
+        position: absolute;
+        top: 800px;
+        left:0px;
+        text-align:center;
+        display:inline-block;        
+    }
+    
+    
+    .hype_nextgame {
+		width:300px;
+        height:75px;
+		font-size:36px;
+		text-align:center;
+		line-height: 75px;
+        display:inline-block;  
+        border-radius: 10px;      
+    }
+    
+    .sponsorstrip_sponsor_banner {
+        width: 100%;
+    }
+    
+    .sponsorstrip_sponsor_banner_shard_1 {
+        position:absolute;
+        height:22px;
+        left: 0px;
+        top:0px;
+        width: 0%;
+    }
+    
+    .sponsorstrip_sponsor_banner_shard_2 {
+        position:absolute;
+        height:22px;
+        right: 0px;
+        top: 20px;
+        width: 0%;
+    }
+    
+    .sponsorstrip_sponsor_banner_shard_3 {
+        position:absolute;
+        height:22px;
+        left: 0px;
+        top: 40px;
+        width: 0%;
+    }
+    
+    .sponsorstrip_sponsor_banner_shard_4 {
+        position:absolute;
+        height:22px;
+        right: 0px;
+        top: 60px;
+        width: 0%;
+    }
+    
+    .sponsorstrip_sponsor_text_container {
+        display:inline-block;
+        text-align:center;
+        position:absolute;
+        top:5px;
+        left:0px;
+        height:80px;
+        width:100%;
+    }
+    
+    .sponsorstrip_sponsor_banner_text {
+      font-size: 60px;
+      line-height: 60px;
+      display:inline-block;
+      height:60px;
+    }
+    
+    .schedule_text_block {
+      font-size: 46px;
+      display:inline-block;
+    }
+    
+    .schedule_local_time_block {
+      text-align:center;
+      width:100%;
+      font-size: 42px;
+      display:inline-block;
+      position:absolute;
+      line-height: 60px;
+      bottom:0px;
+      right:0px;
+    }
+    
+    .toplabel_text_container {
+        width: 100%;
+        position: absolute;
+        top: 25px;
+        left:0px;
+        text-align:center;
+        display:inline-block;        
+    }
+    
+    
+    .toplabel_text {
+		width:300px;
+        height:150px;
+		font-size:60px;
+		text-align:center;
+		line-height: 70px;
+        display:inline-block;    
+        border-radius: 10px;    
+    }
