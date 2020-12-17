@@ -274,18 +274,18 @@ def log_to_database(db, document, collection, mode, keyValuePair=None):
         try:
             dbc.insert_one(document)
         except Exception as e:
-            print("Attempted to write document:")
-            print(document)
             print(e)
             print("ERROR: Could not create document in database")
+            return False
     elif mode == 'update':
         try:
             dbc.update_one(keyValuePair, {"$set": document}, upsert=True)
         except Exception as e:
-            print("Attempted to write document:")
-            print(document)
             print(e)
             print("ERROR: Could not update document in database")
+            return False
+            
+    return True
       
     
 def perform_scan(config):
@@ -373,15 +373,23 @@ def perform_scan(config):
                     for client in clients:
                         success, errors, headers, traffic_history = getClientTrafficHistory(api_key, network['id'], client['id'])
                         document = {
-                            'clientId': client['id'],
-                            'networkId': network['id'],
-                            'networkName': network['name'],
-                            'scanTime': scan_time,
-                            'scanIntervalMinutes': config['scan_interval_minutes']
+                            'clientId'              : client['id'],
+                            'clientMac'             : client['mac'],
+                            'clientIp'              : client['ip'],
+                            'clientDescription'     : client['description'],
+                            'networkId'             : network['id'],
+                            'networkName'           : network['name'],
+                            'scanTime'              : scan_time,
+                            'scanIntervalMinutes'   : config['scan_interval_minutes']
                         }
                         document['trafficHistory'] = traffic_history
-                        log_to_database(db, document, config['endpoints']['getNetworkClientTrafficHistory']['collection'],
+                        success = log_to_database(db, document, config['endpoints']['getNetworkClientTrafficHistory']['collection'],
                             config['endpoints']['getNetworkClientTrafficHistory']['mode'], keyValuePair={'clientId': client['id']})   
+                        if not success:
+                            print("clientId                    : %s" % document['clientId'])
+                            print("networkId                   : %s" % document['networkId'])
+                            print("networkName                 : %s" % document['networkName'])
+                            print("trafficHistory record count : %s" % len(document['trafficHistory']))
             if 'getNetworkMerakiAuthUsers' in config['endpoints'] and config['endpoints']['getNetworkMerakiAuthUsers']['enabled']:
                 success, errors, headers, auth_users = getNetworkMerakiAuthUsers(api_key, network['id'])
                 if 'configTemplateId' in network and config['endpoints']['getNetworkMerakiAuthUsers']['include_template_users']:
