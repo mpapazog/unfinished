@@ -387,6 +387,9 @@ def perform_scan(config):
                             config['endpoints']['getNetworkClientTrafficHistory']['mode'], keyValuePair={'clientId': client['id']})   
                         if not success:
                             print("clientId                    : %s" % document['clientId'])
+                            print("clientMac                   : %s" % document['clientMac'])
+                            print("clientIp                    : %s" % document['clientIp'])
+                            print("clientDescription           : %s" % document['clientDescription'])
                             print("networkId                   : %s" % document['networkId'])
                             print("networkName                 : %s" % document['networkName'])
                             print("trafficHistory record count : %s" % len(document['trafficHistory']))
